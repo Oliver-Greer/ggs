@@ -319,17 +319,18 @@ CASES is like clauses to CASE, e.g.
                  (n-stall-soft 0)
                  (n-walk hard-walk))
             (declare (integer n-accepted n-restart n-stall n-stall-soft n-walk))
-            (incf n-restart)
+            (when (and max-restart (>= seed-1 (+ seed max-restart)))
+              (return))
             (when save-full-history
               (push (nreverse (list :seed seed-1 (list :term init-term :cost init-cost)))
                     full-history))
+            (incf n-restart)
             (loop for i of-type fixnum from 0 do
               (progn
                 (when (or (car finish-flag)
                           ;; Check time every 1024 iters, because
                           ;; GET-INTERNAL-REAL-TIME is slow
-                          (and end-time (zerop (mod i 1024)) (>= (get-internal-real-time) end-time))
-                          (and max-restart (>= seed-1 (+ seed max-restart))))
+                          (and end-time (zerop (mod i 1024)) (>= (get-internal-real-time) end-time)))
                   (return-from solve))
                 (recompute-rose node +rose-node-args-offset+ compute-weights beta-constant)
 

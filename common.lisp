@@ -12,7 +12,7 @@
   (destructuring-bind (slot-var &optional index-var) (ensure-list slot-var)
     (once-only (variadic-structure)
       (with-gensyms (i)
-        `(loop for ,i from ,offset below (length ,variadic-structure)
+        `(loop for ,i of-type fixnum from ,offset below (length (the simple-vector ,variadic-structure))
                ,@(when index-var `(for ,index-var of-type fixnum from 0))
                do (let ((,slot-var (svref ,variadic-structure ,i)))
                     ,@body)
@@ -20,7 +20,7 @@
 
 (declaim (inline n-variadic-slots))
 (defun n-variadic-slots (offset variadic-structure)
-  (- (length variadic-structure) offset))
+  (- (length (the simple-vector variadic-structure)) offset))
 
 (defmacro get-variadic-slot (i offset variadic-structure)
   `(svref ,variadic-structure (+ ,i ,offset)))

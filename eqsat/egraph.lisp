@@ -42,6 +42,7 @@ representativeness."
     (unless (plusp (enode-representative-flag arg)) (return))))
 
 (declaim (inline term-equal))
+(-> term-equal (enode enode) boolean)
 (defun term-equal (x y)
   (declare (optimize speed (safety 0)))
   (unless (and (eql (enode-fsym x) (enode-fsym y))
@@ -51,18 +52,35 @@ representativeness."
         always (eq (svref x i) (svref y i))))
 
 (declaim (inline term-hash))
+(-> term-hash (enode) non-negative-fixnum)
 (defun term-hash (x)
   (declare (optimize speed (safety 0)))
   (let ((hash (sxhash (enode-fsym x)))
         (mul (logand 3622009729038463111 most-positive-fixnum))
         (xor (logand 608948948376289905 most-positive-fixnum)))
-    (declare (type non-negative-fixnum hash))
     (do-enode-args (arg x)
       (setq hash (logand (+ hash (* (enode-hash-code arg) mul)) most-positive-fixnum))
       (setq hash (logand (logxor xor hash (ash hash -5)) most-positive-fixnum)))
     hash))
 
 (lp-hash-table:define-hash-set hash-cons enode-hash-code term-equal)
+
+(-> %enode-find (enode) enode)
+(defun %enode-find (enode)
+  "Slow path of `enode-find' when ENODE is not representative."
+  (declare (optimize speed (safety 0)))
+  (let ((parent (enode-parent enode)))
+    (loop
+      (when (plusp (enode-representative-flag parent))
+        (return parent))
+      (let ((grandparent (enode-parent parent)))
+        (psetf (enode-parent enode) grandparent
+               parent grandparent
+               enode parent)))))
+
+(declaim (inline enode-find))
+(defun enode-find (enode)
+  (if (plusp (enode-representative-flag enode)) enode (%enode-find enode)))
 
 (declaim (inline enode-eclass-info
                  make-analysis-data merge-analysis-data modify-analysis-data
@@ -118,19 +136,6 @@ CLASS-LIST, N-ECLASSES and FSYM-TABLE are only up-to-date after
 
 (defvar *egraph*)
 (setf (documentation '*egraph* 'variable) "Current egraph under operation.")
-
-(-> enode-find (enode) enode)
-(defun enode-find (enode)
-  (if (plusp (enode-representative-flag enode))
-      enode
-      (let ((parent (enode-parent enode)))
-        (loop
-          (when (plusp (enode-representative-flag parent))
-            (return parent))
-          (let ((grandparent (enode-parent parent)))
-            (psetf (enode-parent enode) grandparent
-                   parent grandparent
-                   enode parent))))))
 
 (defun make-analysis-data (eclass-info enode)
   (let ((analysis-info-list (egraph-analysis-info-list *egraph*)))

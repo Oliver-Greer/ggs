@@ -7,7 +7,8 @@
   :serial t
   :depends-on (:alexandria
                :serapeum
-               :metabang-bind)
+               :metabang-bind
+               :cl-environments)
   :components ((:file "common")))
 
 (asdf:defsystem #:ggs/eqsat
@@ -37,7 +38,6 @@
                :ggs/common
                :lp-hash-table
                :metabang-bind
-               :cl-environments
                :float-features
                :bordeaux-threads)
   :components ((:file "package")

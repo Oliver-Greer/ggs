@@ -80,6 +80,7 @@ representativeness."
 
 (declaim (inline enode-find))
 (defun enode-find (enode)
+  (check-type enode enode)
   (if (plusp (enode-representative-flag enode)) enode (%enode-find enode)))
 
 (declaim (inline enode-eclass-info
@@ -171,6 +172,7 @@ CLASS-LIST, N-ECLASSES and FSYM-TABLE are only up-to-date after
 
 (-> intern-enode (enode) enode)
 (defun intern-enode (key-node)
+  (declare (optimize speed (safety 0)))
   (do-enode-args ((arg i) key-node)
     (setf (enode-arg i key-node) (enode-find arg)))
   (let ((hc (egraph-hash-cons *egraph*))
@@ -198,8 +200,16 @@ CLASS-LIST, N-ECLASSES and FSYM-TABLE are only up-to-date after
     (declare (dynamic-extent key-node))
     (intern-enode key-node)))
 
-(-> enode-merge (enode enode) null)
+(declaim (inline enode-merge))
 (defun enode-merge (x y)
+  "Merge the eclasses of enodes X and Y."
+  (check-type x enode)
+  (check-type y enode)
+  (%enode-merge x y))
+
+(-> %enode-merge (enode enode) null)
+(defun %enode-merge (x y)
+  (declare (optimize speed (safety 0)))
   (let ((x (enode-find x))
         (y (enode-find y)))
     (unless (eq x y)
@@ -222,6 +232,8 @@ CLASS-LIST, N-ECLASSES and FSYM-TABLE are only up-to-date after
         nil))))
 
 (defun egraph-rebuild (&key prune-constant)
+  (declare (optimize speed (safety 0)))
+  (check-type *egraph* egraph)
   ;; Upward propagation
 
   ;; Note: we allow duplicates in `egraph-work-list'. Currently we don't bother
@@ -232,7 +244,7 @@ CLASS-LIST, N-ECLASSES and FSYM-TABLE are only up-to-date after
       (declare (type (or null enode) enode))
       (unless enode (return))
       (hash-cons-rem enode (egraph-hash-cons *egraph*))
-      (enode-merge
+      (%enode-merge
        (let ((key-node (copy-seq enode)))
          (declare (dynamic-extent key-node))
          (setf (enode-parent key-node) nil

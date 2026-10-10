@@ -10,8 +10,9 @@
                      (slot-value c 'name)
                      (slot-value c 'rule)))))
 
-(defun compute-rule-lambda (name rule)
+(defun compute-rule-lambda (name rule user-decls)
   `(lambda (&key match-limit)
+     (declare (optimize speed (safety 0)))
      (when match-limit
        (let ((remaining match-limit))
          (do-matches (top-node ,(car rule))
@@ -21,32 +22,34 @@
                     :name ',name :rule ',rule :match-limit match-limit)))))
      (do-matches (top-node ,(car rule))
        (macrolet ((yield-rewrite (rhs)
-                    `(enode-merge top-node ,(expand-template rhs))))
-         ,@(cdr rule)))))
+                    `(%enode-merge top-node ,(expand-template rhs))))
+         (locally (declare ,@user-decls) ,@(cdr rule))))))
 
 (defvar *compiled-rules* (make-hash-table :test 'equal))
 
-(defmacro precompile-rule-set (name)
-  (let ((rules (get-rules name)))
+(defmacro precompile-rule-set (name &environment env)
+  (let ((rules (get-rules name))
+        (user-decls (get-user-decls env)))
     `(let ((rules (get-rules ',name)))
        (unless (equal rules ',rules)
          (warn "Rule set ~A changed between compile and load time" ',name))
        ,@(mapcar (lambda (rule)
                    (if (symbolp rule)
                        `(precompile-rule-set ,rule)
-                       `(setf (gethash '(,name ,rule) *compiled-rules*)
-                              ,(compute-rule-lambda name rule))))
+                       `(setf (gethash '(,name ,rule ,user-decls) *compiled-rules*)
+                              ,(compute-rule-lambda name rule user-decls))))
                  rules)
        ',name)))
 
 (defun compiled-rules (name)
-  (mappend (lambda (rule)
-             (if (symbolp rule)
-                 (compiled-rules rule)
-                 (list
-                  (ensure-gethash (list name rule) *compiled-rules*
-                                  (compile nil (compute-rule-lambda name rule))))))
-           (get-rules name)))
+  (let ((user-decls (get-user-decls nil)))
+    (mappend (lambda (rule)
+               (if (symbolp rule)
+                   (compiled-rules rule)
+                   (list
+                    (ensure-gethash (list name rule user-decls) *compiled-rules*
+                                    (compile nil (compute-rule-lambda name rule user-decls))))))
+             (get-rules name))))
 
 (defun run-rewrites (rule-sets &key max-iter max-time check verbose
                                  initial-match-limit

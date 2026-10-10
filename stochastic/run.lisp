@@ -31,11 +31,6 @@
 (defconstant +inf-cost+ 100000000)
 (deftype cost () `(integer 0 ,+inf-cost+))
 
-(defun get-user-decls (env)
-  `((optimize ,@(remove-if-not (lambda (policy)
-                                 (member (car policy) '(speed safety)))
-                               (cl-environments:declaration-information 'optimize env)))))
-
 (defun compute-rule-set-lambda (rules cost-fn user-decls offset)
   (bind (((:flet wrap-user-decls (rule))
           `(,(car rule) (locally (declare ,@user-decls) ,@(cdr rule))))

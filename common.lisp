@@ -4,7 +4,8 @@
   (:import-from #:metabang-bind #:bind)
   (:export #:define-variadic-structure
            #:do-variadic-slots #:n-variadic-slots #:get-variadic-slot
-           #:var-p #:seq-var-p #:gensym-1 #:get-rules #:defrw #:defrw* #:yield-rewrite))
+           #:var-p #:seq-var-p #:gensym-1 #:get-rules #:defrw #:defrw* #:yield-rewrite
+           #:get-user-decls))
 
 (in-package :ggs/common)
 
@@ -183,6 +184,10 @@ The rule (lhs rhs :guard condition) is equivalent to the :EVAL rule
                       `(,(car rule)
                         (when ,guard (yield-rewrite ,rhs))))))))
     `(eval-always (setf (get ',name 'rules) ',(mapcar #'canonicalize rules)))))
+
+(defun get-user-decls (env &optional (policies '(speed safety)))
+  `((optimize ,@(remove-if-not (lambda (policy) (member (car policy) policies))
+                               (cl-environments:declaration-information 'optimize env)))))
 
 (defmacro yield-rewrite (rhs)
   "Inside :EVAL rules, yield a candidate rewrite with RHS as template."

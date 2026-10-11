@@ -61,18 +61,23 @@ evaluate CONT-EXPR."
                  ,(expand-match bound-vars rest cont-expr))))))
       cont-expr))
 
-(defun expand-template (tmpl)
-  "Generate code that creates an enode according to TMPL (rhs of rewrite rule)."
-  (labels ((process (tmpl)
+(defun expand-template (tmpl &optional into)
+  "Generate code that creates an enode according to TMPL (rhs of rewrite rule).
+If INTO is non-nil, the created enode is merged into eclass INTO\; otherwise it
+is returned."
+  (labels ((process (tmpl into)
              (cond ((consp tmpl)
                     `(let ((key-node (%make-enode
                                       :fsym ,(if (var-p (car tmpl)) (car tmpl) `',(car tmpl))
-                                      :args (list ,@(mapcar #'process (cdr tmpl))))))
+                                      :args (list ,@(mapcar (lambda (tmpl) (process tmpl nil))
+                                                            (cdr tmpl))))))
                        (declare (dynamic-extent key-node))
-                       (intern-enode key-node)))
-                   ((var-p tmpl) tmpl)
-                   (t (process (list tmpl))))))
-    (process tmpl)))
+                       ,(if into
+                            `(%intern-merge-enode ,into key-node)
+                            `(intern-enode key-node))))
+                   ((var-p tmpl) (if into `(%enode-merge ,into ,tmpl) tmpl))
+                   (t (process (list tmpl) into)))))
+    (process tmpl into)))
 
 (defmacro do-matches ((top-node-var pat) &body body)
   "Evaluate BODY for every PAT match in EGRAPH.

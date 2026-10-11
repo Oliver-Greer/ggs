@@ -22,7 +22,7 @@
                     :name ',name :rule ',rule :match-limit match-limit)))))
      (do-matches (top-node ,(car rule))
        (macrolet ((yield-rewrite (rhs)
-                    `(%enode-merge top-node ,(expand-template rhs))))
+                    (expand-template rhs 'top-node)))
          (locally (declare ,@user-decls) ,@(cdr rule))))))
 
 (defvar *compiled-rules* (make-hash-table :test 'equal))

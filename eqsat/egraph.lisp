@@ -63,6 +63,7 @@ representativeness."
       (setq hash (logand (logxor xor hash (ash hash -5)) most-positive-fixnum)))
     hash))
 
+(declaim (inline hash-cons-get hash-cons-put))
 (lp-hash-table:define-hash-set hash-cons enode-hash-code term-equal)
 
 (-> %enode-find (enode) enode)
@@ -147,6 +148,7 @@ CLASS-LIST, N-ECLASSES and FSYM-TABLE are only up-to-date after
 (defun merge-analysis-data (eclass new-class-info)
   (let* ((data-changed nil)
          (class-info (enode-parent eclass)))
+    (declare (type eclass-info class-info))
     (loop for analysis-info in (egraph-analysis-info-list *egraph*)
           for i from +eclass-info-data-offset+ below (length class-info)
           for old-data = (svref class-info i)
@@ -170,14 +172,17 @@ CLASS-LIST, N-ECLASSES and FSYM-TABLE are only up-to-date after
                          (error "Analysis ~a missing from egraph." name))
                      (enode-eclass-info enode)))
 
+(declaim (inline canonicalize-key-node))
+(defun canonicalize-key-node (key-node)
+  (do-enode-args ((arg i) key-node)
+    (setf (enode-arg i key-node) (enode-find arg)))
+  (setf (enode-hash-code key-node) (term-hash key-node)))
+
 (-> intern-enode (enode) enode)
 (defun intern-enode (key-node)
   (declare (optimize speed (safety 0)))
-  (do-enode-args ((arg i) key-node)
-    (setf (enode-arg i key-node) (enode-find arg)))
-  (let ((hc (egraph-hash-cons *egraph*))
-        (hash (term-hash key-node)))
-    (setf (enode-hash-code key-node) hash)
+  (canonicalize-key-node key-node)
+  (let ((hc (egraph-hash-cons *egraph*)))
     ;; Probe with the (dynamic-extent) KEY-NODE; only cons a real enode on miss.
     (or (hash-cons-get key-node hc)
         (lret ((eclass-info (make-eclass-info
@@ -194,6 +199,35 @@ CLASS-LIST, N-ECLASSES and FSYM-TABLE are only up-to-date after
           (hash-cons-put enode hc)
           (make-analysis-data eclass-info enode)
           (modify-analysis-data enode)))))
+
+(-> %intern-merge-enode (enode enode) null)
+(defun %intern-merge-enode (eclass key-node)
+  "Fusion of (enode-merge ECLASS (intern-enode KEY-NODE)).
+
+Analysis modify hooks run only on ECLASS because KEY-NODE is never actually
+interned."
+  (declare (optimize speed (safety 0)))
+  (canonicalize-key-node key-node)
+  (let ((hc (egraph-hash-cons *egraph*)))
+    (if-let (existing (hash-cons-get key-node hc))
+      (%enode-merge eclass existing)
+      (let* ((eclass (enode-find eclass))
+             (info (enode-parent eclass))
+             (enode (copy-seq key-node)))
+        (setf (enode-parent enode) eclass
+              (enode-flags enode) 1)
+        (push enode (eclass-info-nodes info))
+        (do-enode-args (arg enode)
+          (push enode (eclass-info-parents (enode-parent arg)))
+          (incf (eclass-info-n-parents (enode-parent arg))))
+        (hash-cons-put enode hc)
+        (when (egraph-analysis-info-list *egraph*)
+          (let ((new-class-info (make-eclass-info
+                                 :n-args (length (egraph-analysis-info-list *egraph*)))))
+            (declare (dynamic-extent new-class-info))
+            (make-analysis-data new-class-info enode)
+            (merge-analysis-data eclass new-class-info)
+            (modify-analysis-data eclass)))))))
 
 (defun make-enode (fsym &rest args)
   (let ((key-node (%make-enode :fsym fsym :args args)))

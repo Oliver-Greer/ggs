@@ -2,6 +2,10 @@
     (:use #:cl #:ggs/eqsat #:alexandria)
   (:import-from #:fiveam #:def-suite* #:def-test #:is #:in-suite))
 
+(serapeum:eval-always
+ (trivial-package-local-nicknames:add-package-local-nickname
+  "BENCHMARK" "ORG.SHIRAKUMO.TRIVIAL-BENCHMARK" "GGS/EQSAT/TESTS/MATMUL"))
+
 (in-package :ggs/eqsat/tests/matmul)
 
 (def-suite* :matmul :in :ggs/eqsat)
@@ -44,3 +48,26 @@
     (egraph-rebuild)
     (is (eq :saturate (run-rewrites 'assoc-matmul)))
     (is (= 2619 (cost a)))))
+
+;;; Benchmark
+
+(defun bench-matmul-dims (n)
+  "Dimensions of a chain of N matrices, from a fixed pseudo-random sequence."
+  (let ((seed 1))
+    (loop repeat (1+ n)
+          collect (+ 2 (mod (setq seed (mod (* seed 48271) 2147483647)) 30)))))
+
+(def-test bench.matmul (:suite :ggs/eqsat/bench)
+  (let ((timer (make-instance 'benchmark:timer)))
+    (loop for i from 1 to 5 do
+      (let ((*egraph* (make-egraph :analyses '(cost shape))))
+        (format t "~&Benchmark run ~a." i)
+        (trivial-garbage:gc :full t)
+        (let ((a (make-term (make-matmul-term (bench-matmul-dims 60)))))
+          (egraph-rebuild)
+          (benchmark:with-sampling (timer)
+            (run-rewrites '(assoc-matmul -assoc-matmul)))
+          (is (= 1849 (egraph-n-eclasses *egraph*)))
+          (is (= 36069 (egraph-n-enodes *egraph*)))
+          (is (= 30764 (cost a))))))
+    (benchmark:report timer)))

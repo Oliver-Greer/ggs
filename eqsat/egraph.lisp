@@ -229,6 +229,7 @@ CLASS-LIST, N-ECLASSES and FSYM-TABLE are only up-to-date after
   ;; things down a bit.
   (loop
     (let ((enode (pop (egraph-work-list *egraph*))))
+      (declare (type (or null enode) enode))
       (unless enode (return))
       (hash-cons-rem enode (egraph-hash-cons *egraph*))
       (enode-merge

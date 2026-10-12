@@ -111,11 +111,12 @@ function symbol."
   (modify (required-argument :modify) :type function))
 
 (defmacro define-analysis (name &key make merge (modify '(constantly nil)))
+  ;; Define the accessor first: MAKE, MERGE and MODIFY may call it
   `(progn
-     (setf (gethash ',name *analysis-info-registry*)
-           (make-analysis-info :name ',name :make ,make :merge ,merge :modify ,modify))
      (declaim (inline ,name))
-     (defun ,name (enode) (get-analysis-data enode ',name))))
+     (defun ,name (enode) (get-analysis-data enode ',name))
+     (setf (gethash ',name *analysis-info-registry*)
+           (make-analysis-info :name ',name :make ,make :merge ,merge :modify ,modify))))
 
 (defstruct (egraph (:constructor make-egraph (&key analyses)))
   "HASH-CONS stores all canonical enodes. CLASS-LIST lists all
@@ -268,6 +269,8 @@ interned."
 (defun egraph-rebuild (&key prune-constant)
   (declare (optimize speed (safety 0)))
   (check-type *egraph* egraph)
+  (setf prune-constant (and prune-constant (ensure-function prune-constant)))
+
   ;; Upward propagation
 
   ;; Note: we allow duplicates in `egraph-work-list'. Currently we don't bother

@@ -15,6 +15,7 @@
      (declare (optimize speed (safety 0)))
      (when match-limit
        (let ((remaining match-limit))
+         (declare (type fixnum remaining))
          (do-matches (top-node ,(car rule))
            (decf remaining)
            (when (minusp remaining)
@@ -87,8 +88,11 @@ this function."
            (dolist (rule rules)
              (let* ((ban-until (gethash rule ban-until-table))
                     (ban-times (gethash rule ban-times-table 0))
+                    ;; FIXME: will we ever want match-limit greater than
+                    ;; `most-positive-fixnum'?
                     (match-limit (and initial-match-limit
-                                      (ash initial-match-limit ban-times))))
+                                      (min (ash initial-match-limit ban-times)
+                                           most-positive-fixnum))))
                (unless (and ban-until (< n-iter ban-until))
                  (remhash rule ban-until-table)
                  (handler-case (funcall rule :match-limit match-limit)

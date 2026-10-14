@@ -1,45 +1,60 @@
 (in-package :ggs/eqsat)
 
+;; FIXME: currently, `fsym-index' is always an alist (no hash-table
+;; promotion). This may fare badly if an eclass contain may different fsyms.
+;; From what I've seen so far this is rare in practice.
 (define-variadic-structure eclass-info
   "Metadata for the eclass.
 
-Should only appear in reprensetative enode's PARENT slot.
-
-NODES and PARENTS only store canonical enodes after `egraph-rebuild'."
+FSYM-INDEX stores an alist of the form ((fsym . nodes) ...) for NODES after the
+last `egraph-rebuild'. Matching must use the snapshot in FSYM-INDEX, as NODES
+may be written between rebuilds by rule applications. NODES and PARENTS only
+store canonical enodes after `egraph-rebuild'."
   (n-parents 0 :type fixnum)
   (parents nil :type list)
   (nodes nil :type list)
+  (fsym-index nil :type list)
   ((datum data)))
 
 (define-variadic-structure (enode (:constructor %make-enode))
-  "PARENT is either another enode in the same eclass, or an `eclass-info' if this
-enode is the representative of its own eclass.
+  "CLASS-INFO is the `eclass-info' of a representative enode. A representative
+merged away since the last `egraph-rebuild' keeps its CLASS-INFO, for matches to
+see its FSYM-INDEX.
+
+FLAGS packs `enode-hash-code' above +ENODE-FLAG-BITS+ flag bits.
 
 Set CANONICAL-FLAG to NIL to mark the node as non-canonical. `egraph-rebuild'
 trusts this information to avoid testing all term arguments for
 representativeness."
-  (parent)
-  (flags 3 :type fixnum)
-  (hash-code 0 :type fixnum)
+  (parent nil :type (or enode null))
+  (class-info)
+  (hash-code-and-flags 1 :type fixnum)
   (fsym)
   (arg))
 
-(defmacro enode-canonical-flag (enode)
-  `(ldb (byte 1 0) (enode-flags ,enode)))
+(defconstant +enode-flag-bits+ 2)
+(defconstant +enode-hash-bits+ 32)
 
-;; Be aware that representative enode might be non-canonical!
-(defmacro enode-representative-flag (enode)
-  `(ldb (byte 1 1) (enode-flags ,enode)))
+(defmacro enode-hash-code (enode)
+  `(ldb (byte +enode-hash-bits+ +enode-flag-bits+) (enode-hash-code-and-flags ,enode)))
+
+(defmacro enode-canonical-flag (enode)
+  `(ldb (byte 1 0) (enode-hash-code-and-flags ,enode)))
+
+(declaim (inline enode-representative-p))
+(defun enode-representative-p (enode)
+  "Be aware that representative enode might be non-canonical!"
+  (null (enode-parent enode)))
 
 ;; `egraph-rebuild' use this to deduplicate eclasses while scanning the hash
 ;; cons.
 (defmacro eclass-seen-flag (enode)
-  `(ldb (byte 1 2) (enode-flags ,enode)))
+  `(ldb (byte 1 1) (enode-hash-code-and-flags ,enode)))
 
 (defun enode-canonical-p (enode)
   "This doesn't trust CANONICAL-FLAG, for sanity check."
   (do-enode-args (arg enode t)
-    (unless (plusp (enode-representative-flag arg)) (return))))
+    (unless (enode-representative-p arg) (return))))
 
 (declaim (inline term-equal))
 (-> term-equal (enode enode) boolean)
@@ -61,7 +76,7 @@ representativeness."
     (do-enode-args (arg x)
       (setq hash (logand (+ hash (* (enode-hash-code arg) mul)) most-positive-fixnum))
       (setq hash (logand (logxor xor hash (ash hash -5)) most-positive-fixnum)))
-    hash))
+    (ldb (byte +enode-hash-bits+ 0) hash)))
 
 (declaim (inline hash-cons-get hash-cons-put))
 (lp-hash-table:define-hash-set hash-cons enode-hash-code term-equal)
@@ -72,9 +87,8 @@ representativeness."
   (declare (optimize speed (safety 0)))
   (let ((parent (enode-parent enode)))
     (loop
-      (when (plusp (enode-representative-flag parent))
-        (return parent))
       (let ((grandparent (enode-parent parent)))
+        (unless grandparent (return parent))
         (psetf (enode-parent enode) grandparent
                parent grandparent
                enode parent)))))
@@ -82,24 +96,10 @@ representativeness."
 (declaim (inline enode-find))
 (defun enode-find (enode)
   (check-type enode enode)
-  (if (plusp (enode-representative-flag enode)) enode (%enode-find enode)))
+  (if (enode-representative-p enode) enode (%enode-find enode)))
 
-(declaim (inline enode-eclass-info
-                 make-analysis-data merge-analysis-data modify-analysis-data
+(declaim (inline make-analysis-data merge-analysis-data modify-analysis-data
                  get-analysis-data egraph-n-enodes egraph-n-eclasses))
-
-(defun enode-eclass-info (enode)
-  (enode-parent (enode-find enode)))
-
-(defstruct fsym-info
-  "Index data for specific function symbol.
-
-NODES store all enodes with this function symbol.
-
-NODE-TABLE maps eclasses (i.e. representative enodes) to member enodes with this
-function symbol."
-  (nodes nil :type list)
-  (node-table (make-hash-table :test 'eq) :type hash-table))
 
 (defvar *analysis-info-registry* (trivial-garbage:make-weak-hash-table))
 
@@ -120,15 +120,15 @@ function symbol."
 
 (defstruct (egraph (:constructor make-egraph (&key analyses)))
   "HASH-CONS stores all canonical enodes. CLASS-LIST lists all
-eclass (i.e. representative enodes) and N-ECLASSES is its length. FSYM-TABLE
-stores a `fsym-info' entry for every encountered function symbol.
+eclass (i.e. representative enodes) and N-ECLASSES is its length. FSYM-INDEX
+maps every function symbol to all enodes with it.
 
-CLASS-LIST, N-ECLASSES and FSYM-TABLE are only up-to-date after
+CLASS-LIST, N-ECLASSES and FSYM-INDEX are only up-to-date after
 `egraph-rebuild'."
   (hash-cons (make-hash-cons) :type hash-cons)
   (class-list nil :type list)
   (n-eclasses 0 :type fixnum)
-  (fsym-table (make-hash-table) :type hash-table)
+  (fsym-index (make-hash-table) :type hash-table)
   (work-list nil :type list)
   (analysis-info-list
    (mapcar (lambda (name) (or (gethash name *analysis-info-registry*)
@@ -148,7 +148,7 @@ CLASS-LIST, N-ECLASSES and FSYM-TABLE are only up-to-date after
 
 (defun merge-analysis-data (eclass new-class-info)
   (let* ((data-changed nil)
-         (class-info (enode-parent eclass)))
+         (class-info (enode-class-info eclass)))
     (declare (type eclass-info class-info))
     (loop for analysis-info in (egraph-analysis-info-list *egraph*)
           for i from +eclass-info-data-offset+ below (length class-info)
@@ -162,7 +162,7 @@ CLASS-LIST, N-ECLASSES and FSYM-TABLE are only up-to-date after
 
 (defun modify-analysis-data (eclass)
   (let ((analysis-info-list (egraph-analysis-info-list *egraph*)))
-    (do-eclass-info-data (datum (enode-parent eclass))
+    (do-eclass-info-data (datum (enode-class-info eclass))
       (funcall (analysis-info-modify (pop analysis-info-list)) eclass datum)
       ;; modify hook might make ECLASS no longer representative
       (setf eclass (enode-find eclass)))))
@@ -171,13 +171,15 @@ CLASS-LIST, N-ECLASSES and FSYM-TABLE are only up-to-date after
 (defun get-analysis-data (enode name)
   (eclass-info-datum (or (position name (egraph-analysis-info-list *egraph*) :key #'analysis-info-name)
                          (error "Analysis ~a missing from egraph." name))
-                     (enode-eclass-info enode)))
+                     (enode-class-info (enode-find enode))))
 
 (declaim (inline canonicalize-key-node))
 (defun canonicalize-key-node (key-node)
   (do-enode-args ((arg i) key-node)
     (setf (enode-arg i key-node) (enode-find arg)))
-  (setf (enode-hash-code key-node) (term-hash key-node)))
+  ;; Key nodes are canonical, with no other flag
+  (setf (enode-hash-code-and-flags key-node)
+        (logior (ash (term-hash key-node) +enode-flag-bits+) 1)))
 
 (-> intern-enode (enode) enode)
 (defun intern-enode (key-node)
@@ -193,10 +195,11 @@ CLASS-LIST, N-ECLASSES and FSYM-TABLE are only up-to-date after
           (loop for i of-type fixnum from +eclass-info-data-offset+ below (length eclass-info)
                 do (setf (svref eclass-info i) 'unbound))
           (setf (eclass-info-nodes eclass-info) (list enode)
-                (enode-parent enode) eclass-info)
+                (enode-parent enode) nil
+                (enode-class-info enode) eclass-info)
           (do-enode-args (arg enode)
-            (push enode (eclass-info-parents (enode-parent arg)))
-            (incf (eclass-info-n-parents (enode-parent arg))))
+            (push enode (eclass-info-parents (enode-class-info arg)))
+            (incf (eclass-info-n-parents (enode-class-info arg))))
           (hash-cons-put enode hc)
           (make-analysis-data eclass-info enode)
           (modify-analysis-data enode)))))
@@ -213,14 +216,13 @@ interned."
     (if-let (existing (hash-cons-get key-node hc))
       (%enode-merge eclass existing)
       (let* ((eclass (enode-find eclass))
-             (info (enode-parent eclass))
+             (info (enode-class-info eclass))
              (enode (copy-seq key-node)))
-        (setf (enode-parent enode) eclass
-              (enode-flags enode) 1)
+        (setf (enode-parent enode) eclass)
         (push enode (eclass-info-nodes info))
         (do-enode-args (arg enode)
-          (push enode (eclass-info-parents (enode-parent arg)))
-          (incf (eclass-info-n-parents (enode-parent arg))))
+          (push enode (eclass-info-parents (enode-class-info arg)))
+          (incf (eclass-info-n-parents (enode-class-info arg))))
         (hash-cons-put enode hc)
         (when (egraph-analysis-info-list *egraph*)
           (let ((new-class-info (make-eclass-info
@@ -248,8 +250,8 @@ interned."
   (let ((x (enode-find x))
         (y (enode-find y)))
     (unless (eq x y)
-      (let ((px (enode-parent x))
-            (py (enode-parent y)))
+      (let ((px (enode-class-info x))
+            (py (enode-class-info y)))
         (when (< (eclass-info-n-parents px)
                  (eclass-info-n-parents py))
           (rotatef x y)
@@ -260,8 +262,7 @@ interned."
             (push parent (egraph-work-list *egraph*))))
         (setf (eclass-info-nodes px)
               (nreconc (eclass-info-nodes py) (eclass-info-nodes px))
-              (enode-parent y) x
-              (enode-representative-flag y) 0)
+              (enode-parent y) x)
         (merge-analysis-data x py)
         (modify-analysis-data x)
         nil))))
@@ -284,16 +285,15 @@ interned."
       (%enode-merge
        (let ((key-node (copy-seq enode)))
          (declare (dynamic-extent key-node))
-         (setf (enode-parent key-node) nil
-               (enode-flags key-node) 3)
          (intern-enode key-node))
        enode)))
+
   ;; Update analysis
   (loop
     (let ((enode (pop (egraph-analysis-work-list *egraph*))))
       (unless enode (return))
-      (when (plusp (enode-representative-flag enode))
-        (let ((info (enode-parent enode)))
+      (when (enode-representative-p enode)
+        (let ((info (enode-class-info enode)))
           (dolist (parent (eclass-info-parents info))
             (when (plusp (enode-canonical-flag parent))
               (let ((new-class-info (make-eclass-info
@@ -305,16 +305,21 @@ interned."
                 (make-analysis-data new-class-info parent)
                 (merge-analysis-data eclass new-class-info)
                 (modify-analysis-data eclass))))))))
+
   ;; Build eclass index by collecting all representative enodes of canonical
   ;; enodes in `egraph-hash-cons'. Note we really need to `enode-find' here,
   ;; because canon-enodes might be non-rep, while rep-enodes might not be canon
   ;; thus not appear in `egraph-hash-cons' either so we can't simply test for
-  ;; `enode-representative-flag'.
+  ;; `enode-representative-p'.
   (let ((classes nil)
         (n-eclasses 0))
     (declare (type fixnum n-eclasses))
     (map-hash-cons (lambda (node)
                      (let ((class (enode-find node)))
+                       ;; Clear merged-away eclass-info
+                       (unless (eq class node)
+                         (setf (enode-class-info node) nil))
+
                        (when (zerop (eclass-seen-flag class))
                          (setf (eclass-seen-flag class) 1)
                          (push class classes)
@@ -323,24 +328,40 @@ interned."
     ;; make `egraph-class-list' match insertion order
     (setf (egraph-class-list *egraph*) (nreverse classes)
           (egraph-n-eclasses *egraph*) n-eclasses))
+
   ;; Build various node index. We used to also prune non-canonical enodes from
   ;; eclass-info-parents here, but not doing it seems faster
-  (clrhash (egraph-fsym-table *egraph*))
-  (dolist (class (egraph-class-list *egraph*))
-    (setf (eclass-seen-flag class) 0)
-    (let ((info (enode-parent class)))
-      (setf (eclass-info-nodes info)
-            (delete-if-not (lambda (n) (plusp (enode-canonical-flag n))) (eclass-info-nodes info)))
-      (when prune-constant
+  (let ((fsym-index (egraph-fsym-index *egraph*)))
+    (clrhash fsym-index)
+    (dolist (class (egraph-class-list *egraph*))
+      (setf (eclass-seen-flag class) 0)
+      (let ((info (enode-class-info class))
+            (alist nil))
+        ;; Drop non-canonical enodes, preserving order
+        (do* ((head (cons nil (eclass-info-nodes info)))
+              (prev head)
+              (cell (cdr prev) (cdr prev)))
+             ((null cell)
+              (setf (eclass-info-nodes info) (cdr head)))
+          (declare (dynamic-extent head))
+          (if (plusp (enode-canonical-flag (car cell)))
+              (setq prev cell)
+              (setf (cdr prev) (cdr cell))))
+
+        (when prune-constant
+          (dolist (node (eclass-info-nodes info))
+            (when (funcall prune-constant (enode-fsym node))
+              (setf (eclass-info-nodes info) (list node))
+              (return))))
+
         (dolist (node (eclass-info-nodes info))
-          (when (funcall prune-constant (enode-fsym node))
-            (setf (eclass-info-nodes info) (list node))
-            (return))))
-      (dolist (node (eclass-info-nodes info))
-        (let ((fsym-info (ensure-gethash (enode-fsym node) (egraph-fsym-table *egraph*)
-                                         (make-fsym-info))))
-          (push node (gethash class (fsym-info-node-table fsym-info)))
-          (push node (fsym-info-nodes fsym-info)))))))
+          (let* ((fsym (enode-fsym node))
+                 (entry (or (assoc fsym alist) (car (push (list fsym) alist)))))
+            (push node (cdr entry))))
+        (setf (eclass-info-fsym-index info) alist)
+        (loop for (fsym . nodes) in alist
+              do (setf (gethash fsym fsym-index)
+                       (append nodes (gethash fsym fsym-index))))))))
 
 ;;; Utils
 
@@ -380,13 +401,13 @@ interned."
         (dolist (node nodes)
           (if (enode-canonical-p node)
               (do-enode-args (arg node)
-                (unless (member node (eclass-info-parents (enode-parent arg)))
+                (unless (member node (eclass-info-parents (enode-class-info arg)))
                   (error "Missing parent link from ~a to ~a" arg node)))
               (error "Non canonical node ~a on ~a's node list" node class)))
         (unless (= (length nodes)
                    (length (remove-duplicates nodes :test 'term-equal)))
           (warn "Duplicates in ~a's enodes:~% ~a" class nodes)))
-      (let ((parents (eclass-info-parents (enode-parent class))))
+      (let ((parents (eclass-info-parents (enode-class-info class))))
         (dolist (node parents)
           (if (enode-canonical-p node)
               (unless (do-enode-args (arg node)
@@ -409,7 +430,7 @@ interned."
   "List of enodes equivalent to ENODE.
 
 Only contains canonical enodes after `egraph-rebuild'."
-  (eclass-info-nodes (enode-eclass-info enode)))
+  (eclass-info-nodes (enode-class-info (enode-find enode))))
 
 (defun egraph-n-enodes (egraph)
   (hash-cons-count (egraph-hash-cons egraph)))

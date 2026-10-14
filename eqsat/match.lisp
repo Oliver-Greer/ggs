@@ -1,7 +1,5 @@
 (in-package :ggs/eqsat)
 
-(defvar *fsym-info-var-alist*)
-
 (defun parse-pattern (pat eclass-var)
   "Convert PAT into a list of the form ((eclass-var fsym arg-var...) ...)."
   (cond ((consp pat)
@@ -26,39 +24,43 @@ evaluate CONT-EXPR."
                   (gensym-1 fsym)
                   (progn (push var bound-vars) var)))
              (lisp-arg-vars (mapcar #'lisp-var arg-vars))
-             (fsym-info-var (unless (var-p fsym)
-                              (serapeum:ensure (assoc-value *fsym-info-var-alist* fsym)
-                                (gensym-1 fsym))))
              (lhs-bound-p (member var bound-vars))
              (fsym-var-p (var-p fsym))
-             (node-var (lisp-var var)))
-        ;; FIXME: No index for ?fsym queries yet. Do we want one?
+             (node-var (lisp-var var))
+             ;; What happens after NODE-VAR is bound
+             (body
+              ;; We check arity first, and SBCL seems to know to eliminate SVREF
+              ;; bound checks in the body
+              `(when (= (enode-n-args ,node-var) ,(length arg-vars))
+                 (let (,@(when fsym-var-p
+                           `((,fsym (enode-fsym ,node-var))))
+                       ,@(mapcar (lambda (lisp-arg-var i)
+                                   `(,lisp-arg-var (svref ,node-var ,i)))
+                                 lisp-arg-vars
+                                 (iota (length lisp-arg-vars) :start +enode-args-offset+)))
+                   (declare (ignorable ,@(when fsym-var-p `(,fsym)) ,@lisp-arg-vars))
+                   (when (and ,@(mapcan (lambda (lisp-var var)
+                                          (when (and (var-p var) (not (var-p lisp-var)))
+                                            `((eq ,lisp-var ,var))))
+                                        lisp-arg-vars arg-vars))
+                     ,(expand-match bound-vars rest cont-expr))))))
 
-        ;; Currently we use indexes (in `fsym-info') as single source of truth
+        ;; Currently we use indexes (`egraph-fsym-index' and
+        ;; `eclass-info-fsym-index') as single source of truth
         ;; for matching, thus no-need to `enode-find' representative of VAR
         ;; (even if VAR is non-rep, it once was when we built the index in
         ;; `egraph-rebuild'
-        `(dolist (,node-var
-                  ,(cond (fsym-var-p
-                          (assert lhs-bound-p)
-                          `(list-enodes ,var))
-                         (lhs-bound-p
-                          `(gethash ,var (fsym-info-node-table ,fsym-info-var)))
-                         (t `(fsym-info-nodes ,fsym-info-var))))
-           ;; We check arity first, and SBCL seems to know to eliminate SVREF
-           ;; bound checks in the body
-           (when (= (enode-n-args ,node-var) ,(length arg-vars))
-             (let (,@(when fsym-var-p
-                       `((,fsym (enode-fsym ,node-var))))
-                   ,@(mapcar (lambda (lisp-arg-var i)
-                               `(,lisp-arg-var (svref ,node-var ,i)))
-                             lisp-arg-vars (iota (length lisp-arg-vars) :start +enode-args-offset+)))
-               (declare (ignorable ,@(when fsym-var-p `(,fsym)) ,@lisp-arg-vars))
-               (when (and ,@(mapcan (lambda (lisp-var var)
-                                      (when (and (var-p var) (not (var-p lisp-var)))
-                                        `((eq ,lisp-var ,var))))
-                                    lisp-arg-vars arg-vars))
-                 ,(expand-match bound-vars rest cont-expr))))))
+        (cond (fsym-var-p
+               (assert lhs-bound-p)
+               `(dolist (%entry (eclass-info-fsym-index (enode-class-info ,var)))
+                  (dolist (,node-var (cdr %entry))
+                    ,body)))
+              (lhs-bound-p
+               `(dolist (,node-var (assoc-value (eclass-info-fsym-index (enode-class-info ,var))
+                                                ',fsym))
+                  ,body))
+              (t `(dolist (,node-var (gethash ',fsym (egraph-fsym-index *egraph*)))
+                    ,body))))
       cont-expr))
 
 (defun expand-template (tmpl &optional into)
@@ -89,12 +91,5 @@ TOP-NODE-VAR bound to the enode matching PAT."
          (let ((,top-node-var ,pat))
            (declare (ignorable ,top-node-var))
            ,@body))
-      (let* ((*fsym-info-var-alist* nil)
-             (match-body
-               (expand-match nil (parse-pattern pat top-node-var)
-                             `(locally ,@body))))
-        `(let ,(mapcar (lambda (kv) `(,(cdr kv)
-                                      (ensure-gethash ',(car kv) (egraph-fsym-table *egraph*)
-                                                      (make-fsym-info))))
-                       *fsym-info-var-alist*)
-           ,match-body))))
+      (expand-match nil (parse-pattern pat top-node-var)
+                    `(locally ,@body))))

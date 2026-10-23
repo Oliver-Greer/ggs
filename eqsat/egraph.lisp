@@ -98,8 +98,8 @@ representativeness."
         (mul (logand 3622009729038463111 most-positive-fixnum))
         (xor (logand 608948948376289905 most-positive-fixnum)))
     (do-enode-args (arg x)
-      (setq hash (logand (+ hash (* (enode-hash-code arg) mul)) most-positive-fixnum))
-      (setq hash (logand (logxor xor hash (ash hash -5)) most-positive-fixnum)))
+      (setq hash (logand (+ hash (* (enode-hash-code arg) mul)) most-positive-fixnum)
+            hash (logand (logxor xor hash (ash hash -5)) most-positive-fixnum)))
     (ldb (byte +enode-hash-bits+ 0) hash)))
 
 (declaim (inline hash-cons-get hash-cons-put))
@@ -209,10 +209,9 @@ CLASS-LIST, N-ECLASSES and FSYM-INDEX are only up-to-date after
   (setf (enode-hash-code-and-flags key-node)
         (logior (ash (term-hash key-node) +enode-flag-bits+) 1)))
 
-(-> intern-enode (enode) enode)
-(defun intern-enode (key-node)
+(-> %intern-enode (enode) enode)
+(defun %intern-enode (key-node)
   (declare (optimize speed (safety 0)))
-  (canonicalize-key-node key-node)
   (let* ((g *egraph*)
          (hc (egraph-hash-cons g)))
     ;; Probe with the (dynamic-extent) KEY-NODE; only cons a real enode on miss.
@@ -235,12 +234,11 @@ CLASS-LIST, N-ECLASSES and FSYM-INDEX are only up-to-date after
 
 (-> %intern-merge-enode (enode enode) null)
 (defun %intern-merge-enode (eclass key-node)
-  "Fusion of (enode-merge ECLASS (intern-enode KEY-NODE)).
+  "Fusion of (%enode-merge ECLASS (%intern-enode KEY-NODE)).
 
 Analysis modify hooks run only on ECLASS because KEY-NODE is never actually
 interned."
   (declare (optimize speed (safety 0)))
-  (canonicalize-key-node key-node)
   (let* ((g *egraph*)
          (hc (egraph-hash-cons g)))
     (if-let (existing (hash-cons-get key-node hc))
@@ -262,10 +260,46 @@ interned."
             (merge-analysis-data eclass new-class-info)
             (modify-analysis-data eclass)))))))
 
+(defmacro with-key-node (key-node-var (fsym &rest args) &body body)
+  ;; internal, may evaluate FSYM and ARGS multiple times, please only pass in
+  ;; variables
+  `(let* (,@(mapcar (lambda (arg) `(,arg (enode-find ,arg))) args)
+          (hash
+            (let ((hash (sxhash ,fsym))
+                  (mul (logand 3622009729038463111 most-positive-fixnum))
+                  (xor (logand 608948948376289905 most-positive-fixnum)))
+              (declare (ignorable mul xor))
+              ,@(mapcar
+                 (lambda (arg)
+                   `(setq hash (logand (+ hash (* (enode-hash-code ,arg) mul)) most-positive-fixnum)
+                          hash (logand (logxor xor hash (ash hash -5)) most-positive-fixnum)))
+                 args)
+              (ldb (byte +enode-hash-bits+ 0) hash)))
+          (,key-node-var
+            (%make-enode :fsym ,fsym :args (list ,@args)
+                         :hash-code-and-flags (logior (ash hash +enode-flag-bits+) 1))))
+     (declare (dynamic-extent ,key-node-var))
+     ,@body))
+
+(declaim (inline make-enode))
 (defun make-enode (fsym &rest args)
+  (dolist (arg args) (check-type arg enode))
   (let ((key-node (%make-enode :fsym fsym :args args)))
     (declare (dynamic-extent key-node))
-    (intern-enode key-node)))
+    (canonicalize-key-node key-node)
+    (%intern-enode key-node)))
+
+(define-compiler-macro make-enode (fsym &rest args &environment env)
+  ;; don't rebind FSYM if it's a constant, so that (sxhash FSYM) inside
+  ;; `with-key-node' can be constant folded
+  (let ((fsym-var (unless (constantp fsym env) 'fsym))
+        (arg-vars (make-gensym-list (length args) "ARG")))
+    `(let (,@(when fsym-var `((,fsym-var ,fsym)))
+           ,@(mapcar #'list arg-vars args))
+       (declare (optimize speed (safety 0)))
+       ,@(mapcar (lambda (arg) `(check-type ,arg enode)) arg-vars)
+       (with-key-node key-node (,(or fsym-var fsym) ,@arg-vars)
+         (%intern-enode key-node)))))
 
 (declaim (inline enode-merge))
 (defun enode-merge (x y)
@@ -273,6 +307,23 @@ interned."
   (check-type x enode)
   (check-type y enode)
   (%enode-merge x y))
+
+(define-compiler-macro enode-merge (&whole form x y &environment env)
+  (cond ((and (consp y) (eql (car y) 'make-enode))
+         (destructuring-bind (fsym &rest args) (cdr y)
+           (once-only (x)
+             ;; don't rebind FSYM if it's a constant, so that (sxhash FSYM) inside
+             ;; `with-key-node' can be constant folded
+             (let ((fsym-var (unless (constantp fsym env) 'fsym))
+                   (arg-vars (make-gensym-list (length args) "ARG")))
+               `(let (,@(when fsym-var `((,fsym-var ,fsym)))
+                      ,@(mapcar #'list arg-vars args))
+                  (declare (optimize speed (safety 0)))
+                  (check-type ,x enode)
+                  ,@(mapcar (lambda (arg) `(check-type ,arg enode)) arg-vars)
+                  (with-key-node key-node (,(or fsym-var fsym) ,@arg-vars)
+                    (%intern-merge-enode ,x key-node)))))))
+        (t form)))
 
 (-> %enode-merge (enode enode) null)
 (defun %enode-merge (x y)
@@ -315,6 +366,7 @@ interned."
       (hash-cons-rem enode (egraph-hash-cons g))
       (let ((key-node (copy-seq enode)))
         (declare (dynamic-extent key-node))
+        (canonicalize-key-node key-node)
         (%intern-merge-enode enode key-node))))
 
   ;; Update analysis

@@ -38,7 +38,8 @@ evaluate CONT-EXPR."
                                    `(,lisp-arg-var (svref ,node-var ,i)))
                                  lisp-arg-vars
                                  (iota (length lisp-arg-vars) :start +enode-args-offset+)))
-                   (declare (ignorable ,@(when fsym-var-p `(,fsym)) ,@lisp-arg-vars))
+                   (declare (ignorable ,@(when fsym-var-p `(,fsym)) ,@lisp-arg-vars)
+                            (type enode ,@lisp-arg-vars))
                    (when (and ,@(mapcan (lambda (lisp-var var)
                                           (when (and (var-p var) (not (var-p lisp-var)))
                                             `((eq ,lisp-var ,var))))
@@ -53,36 +54,29 @@ evaluate CONT-EXPR."
         (cond (fsym-var-p
                (assert lhs-bound-p)
                `(dolist (%entry (eclass-info-fsym-index (enode-class-info ,var)))
-                  (dolist (,node-var (cdr %entry)) ,body)))
+                  (dolist (,node-var (cdr %entry))
+                    (declare (type enode ,node-var))
+                    ,body)))
               (lhs-bound-p
                `(dolist (,node-var (assoc-value (eclass-info-fsym-index (enode-class-info ,var))
                                                 ',fsym))
+                  (declare (type enode ,node-var))
                   ,body))
               (t `(dolist (%list (gethash ',fsym (egraph-fsym-index *egraph*)))
-                    (dolist (,node-var %list) ,body)))))
+                    (dolist (,node-var %list)
+                      (declare (type enode ,node-var))
+                      ,body)))))
       cont-expr))
 
-(defun expand-template (tmpl &optional into)
-  "Generate code that creates an enode according to TMPL (rhs of rewrite rule).
-If INTO is non-nil, the created enode is merged into eclass INTO\; otherwise it
-is returned.
-
-We pass INTO here instead of fuse `merge-node' with code that returns the
-created enode because we want to stack allocate the enode and call
-`%intern-merge-enode' within its dynamic extent."
-  (labels ((process (tmpl into)
+(defun expand-template (tmpl)
+  "Generate code that creates an enode according to TMPL (rhs of rewrite rule)."
+  (labels ((process (tmpl)
              (cond ((consp tmpl)
-                    `(let ((key-node (%make-enode
-                                      :fsym ,(if (var-p (car tmpl)) (car tmpl) `',(car tmpl))
-                                      :args (list ,@(mapcar (lambda (tmpl) (process tmpl nil))
-                                                            (cdr tmpl))))))
-                       (declare (dynamic-extent key-node))
-                       ,(if into
-                            `(%intern-merge-enode ,into key-node)
-                            `(intern-enode key-node))))
-                   ((var-p tmpl) (if into `(%enode-merge ,into ,tmpl) tmpl))
-                   (t (process (list tmpl) into)))))
-    (process tmpl into)))
+                    `(make-enode ,(if (var-p (car tmpl)) (car tmpl) `',(car tmpl))
+                                 ,@(mapcar #'process (cdr tmpl))))
+                   ((var-p tmpl) tmpl)
+                   (t (process (list tmpl))))))
+    (process tmpl)))
 
 (defmacro do-matches ((top-node-var pat) &body body)
   "Evaluate BODY for every PAT match in EGRAPH.
@@ -92,7 +86,7 @@ TOP-NODE-VAR bound to the enode matching PAT."
   (if (var-p pat) ; Special case for single variable PAT that scans all enodes
       `(dolist (,pat (egraph-class-list *egraph*))
          (let ((,top-node-var ,pat))
-           (declare (ignorable ,top-node-var))
+           (declare (ignorable ,top-node-var) (type enode ,pat ,top-node-var))
            ,@body))
       (expand-match nil (parse-pattern pat top-node-var)
                     `(locally ,@body))))

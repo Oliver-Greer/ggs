@@ -123,7 +123,7 @@ representativeness."
   (check-type enode enode)
   (if (enode-representative-p enode) enode (%enode-find enode)))
 
-(declaim (inline make-analysis-data merge-analysis-data modify-analysis-data
+(declaim (inline make-analysis-data merge-analysis-data
                  get-analysis-data egraph-n-enodes egraph-n-eclasses))
 
 (defvar *analysis-info-registry* (trivial-garbage:make-weak-hash-table))
@@ -132,16 +132,15 @@ representativeness."
   "Data for e-analysis."
   (name (required-argument :name) :type symbol)
   (make (required-argument :make) :type (function (enode) t))
-  (merge (required-argument :merge) :type function)
-  (modify (required-argument :modify) :type function))
+  (merge (required-argument :merge) :type function))
 
-(defmacro define-analysis (name &key make merge (modify '(constantly nil)))
-  ;; Define the accessor first: MAKE, MERGE and MODIFY may call it
+(defmacro define-analysis (name &key make merge)
+  ;; Define the accessor first: MAKE and MERGE may call it
   `(progn
      (declaim (inline ,name))
      (defun ,name (enode) (get-analysis-data enode ',name))
      (setf (gethash ',name *analysis-info-registry*)
-           (make-analysis-info :name ',name :make ,make :merge ,merge :modify ,modify))))
+           (make-analysis-info :name ',name :make ,make :merge ,merge))))
 
 (defstruct (egraph (:constructor make-egraph (&key analyses)))
   "HASH-CONS stores all canonical enodes. CLASS-LIST lists all
@@ -187,13 +186,6 @@ CLASS-LIST, N-ECLASSES and FSYM-INDEX are only up-to-date after
     (when data-changed
       (push eclass (egraph-analysis-work-list *egraph*)))))
 
-(defun modify-analysis-data (eclass)
-  (let ((analysis-info-list (egraph-analysis-info-list *egraph*)))
-    (do-eclass-info-data (datum (enode-class-info eclass))
-      (funcall (analysis-info-modify (pop analysis-info-list)) eclass datum)
-      ;; modify hook might make ECLASS no longer representative
-      (setf eclass (enode-find eclass)))))
-
 (-> get-analysis-data (enode symbol) t)
 (defun get-analysis-data (enode name)
   (eclass-info-datum (or (position name (egraph-analysis-info-list *egraph*) :key #'analysis-info-name)
@@ -215,50 +207,47 @@ CLASS-LIST, N-ECLASSES and FSYM-INDEX are only up-to-date after
   (let* ((g *egraph*)
          (hc (egraph-hash-cons g)))
     ;; Probe with the (dynamic-extent) KEY-NODE; only cons a real enode on miss.
-    (or (hash-cons-get key-node hc)
-        (lret ((eclass-info (make-eclass-info
-                             :n-parents 0 :parents nil :nodes nil
-                             :n-args (length (egraph-analysis-info-list g))))
-               (enode (copy-seq key-node)))
-          (loop for i of-type fixnum from +eclass-info-data-offset+ below (length eclass-info)
-                do (setf (svref eclass-info i) 'unbound))
-          (setf (eclass-info-nodes eclass-info) (list enode)
-                (enode-parent enode) nil
-                (enode-class-info enode) eclass-info)
-          (do-enode-args (arg enode)
-            (push enode (eclass-info-parents (enode-class-info arg)))
-            (incf (eclass-info-n-parents (enode-class-info arg))))
-          (hash-cons-put enode hc)
-          (make-analysis-data eclass-info enode)
-          (modify-analysis-data enode)))))
+    (values
+     (hash-cons-ensure key-node hc
+         (lret ((eclass-info (make-eclass-info
+                              :n-parents 0 :parents nil :nodes nil
+                              :n-args (length (egraph-analysis-info-list g))))
+                (enode (copy-seq key-node)))
+           (loop for i of-type fixnum from +eclass-info-data-offset+ below (length eclass-info)
+                 do (setf (svref eclass-info i) 'unbound))
+           (setf (eclass-info-nodes eclass-info) (list enode)
+                 (enode-parent enode) nil
+                 (enode-class-info enode) eclass-info)
+           (do-enode-args (arg enode)
+             (push enode (eclass-info-parents (enode-class-info arg)))
+             (incf (eclass-info-n-parents (enode-class-info arg))))
+           (make-analysis-data eclass-info enode))))))
 
 (-> %intern-merge-enode (enode enode) null)
 (defun %intern-merge-enode (eclass key-node)
-  "Fusion of (%enode-merge ECLASS (%intern-enode KEY-NODE)).
-
-Analysis modify hooks run only on ECLASS because KEY-NODE is never actually
-interned."
+  "Fusion of (%enode-merge ECLASS (%intern-enode KEY-NODE))."
   (declare (optimize speed (safety 0)))
   (let* ((g *egraph*)
-         (hc (egraph-hash-cons g)))
-    (if-let (existing (hash-cons-get key-node hc))
-      (%enode-merge existing eclass)
-      (let* ((eclass (enode-find eclass))
-             (info (enode-class-info eclass))
-             (enode (copy-seq key-node)))
-        (setf (enode-parent enode) eclass)
-        (push enode (eclass-info-nodes info))
-        (do-enode-args (arg enode)
-          (push enode (eclass-info-parents (enode-class-info arg)))
-          (incf (eclass-info-n-parents (enode-class-info arg))))
-        (hash-cons-put enode hc)
-        (when (egraph-analysis-info-list g)
-          (let ((new-class-info (make-eclass-info
-                                 :n-args (length (egraph-analysis-info-list g)))))
-            (declare (dynamic-extent new-class-info))
-            (make-analysis-data new-class-info enode)
-            (merge-analysis-data eclass new-class-info)
-            (modify-analysis-data eclass)))))))
+         (hc (egraph-hash-cons g))
+         (eclass (enode-find eclass)))
+    (multiple-value-bind (enode existing-p)
+        (hash-cons-ensure key-node hc
+            (lret* ((info (enode-class-info eclass))
+                    (enode (copy-seq key-node)))
+              (setf (enode-parent enode) eclass)
+              (push enode (eclass-info-nodes info))
+              (do-enode-args (arg enode)
+                (push enode (eclass-info-parents (enode-class-info arg)))
+                (incf (eclass-info-n-parents (enode-class-info arg))))))
+      (if existing-p
+          (%enode-merge enode eclass)
+          (when (egraph-analysis-info-list g)
+            (let ((new-class-info (make-eclass-info
+                                   :n-args (length (egraph-analysis-info-list g)))))
+              (declare (dynamic-extent new-class-info))
+              (make-analysis-data new-class-info enode)
+              (merge-analysis-data eclass new-class-info)
+              nil))))))
 
 (defmacro with-key-node (key-node-var (fsym &rest args) &body body)
   ;; internal, may evaluate FSYM and ARGS multiple times, please only pass in
@@ -346,7 +335,6 @@ interned."
               (nreconc (eclass-info-nodes py) (eclass-info-nodes px))
               (enode-parent y) x)
         (merge-analysis-data x py)
-        (modify-analysis-data x)
         nil))))
 
 (defun egraph-rebuild (&key prune-constant &aux (g *egraph*))
@@ -384,8 +372,7 @@ interned."
                 (loop for i of-type fixnum from +eclass-info-data-offset+ below (length new-class-info)
                       do (setf (svref new-class-info i) 'unbound))
                 (make-analysis-data new-class-info parent)
-                (merge-analysis-data eclass new-class-info)
-                (modify-analysis-data eclass))))))))
+                (merge-analysis-data eclass new-class-info))))))))
 
   ;; Build eclass index by collecting all representative enodes of canonical
   ;; enodes in `egraph-hash-cons'. Note we really need to `enode-find' here,

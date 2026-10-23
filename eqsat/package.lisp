@@ -1,6 +1,6 @@
 (uiop:define-package :ggs/eqsat
     (:use #:cl #:alexandria #:ggs/common)
-  (:import-from #:serapeum #:lret #:->)
+  (:import-from #:serapeum #:lret #:lret* #:->)
   (:import-from #:bind #:bind)
   (:export #:make-enode #:enode-fsym #:enode-arg #:enode-n-args
            #:do-enode-args #:map-enode-args #:make-egraph #:list-enodes

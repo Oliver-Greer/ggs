@@ -22,7 +22,7 @@
                 ,(process args 0)))))
        clauses)))
 
-(defmacro define-analysis ((name &key merge bottom) &body clauses)
+(defun compute-make-lambda (merge bottom clauses)
   (let ((clauses-by-fsym (make-ordered-table)))
     (dolist (clause clauses)
       (when (var-p (caar clause))
@@ -30,23 +30,26 @@
       (ordered-table-put (caar clause)
                          (cons clause (ordered-table-get (caar clause) clauses-by-fsym))
                          clauses-by-fsym))
-    `(progn
-       (declaim (inline ,name))
-       (defun ,name (enode) (get-analysis-data enode ',name))
-       (setf (gethash ',name *analysis-info-registry*)
-             (make-analysis-info
-              :name ',name
-              :bottom ,bottom
-              :merge ,merge
-              :make (lambda (top-enode)
-                      (let ((result ,bottom))
-                        (case (enode-fsym top-enode)
-                          ,@(collecting
-                              (map-ordered-table
-                               (lambda (fsym clauses)
-                                 (collect (compute-analysis-clause fsym clauses merge)))
-                               clauses-by-fsym)))
-                        result)))))))
+    `(lambda (top-enode)
+       (macrolet ((get-analysis-data (name enode)
+                    `(enode-analysis-data ',name ,enode)))
+         (let ((result ,bottom))
+           (case (enode-fsym top-enode)
+             ,@(collecting
+                 (map-ordered-table
+                  (lambda (fsym clauses)
+                    (collect (compute-analysis-clause fsym clauses merge)))
+                  clauses-by-fsym)))
+           result)))))
+
+(defvar *compiled-makes* (make-hash-table :test 'equal))
+
+(defun compiled-analysis (name)
+  (bind (((:plist merge bottom clauses) (get-analysis name)))
+    (make-analysis-info
+     :name name :merge merge :bottom bottom
+     :make (ensure-gethash (list merge bottom clauses) *compiled-makes*
+                           (compile nil (compute-make-lambda merge bottom clauses))))))
 
 ;;; Convenient merge functions
 

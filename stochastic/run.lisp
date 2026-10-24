@@ -144,7 +144,7 @@
 
 (defvar *compiled-rule-sets* (make-hash-table :test 'equal))
 
-(defmacro precompile-rule-set (name cost-fn &environment env)
+(defmacro precompile-stochastic-rule-set (name cost-fn &environment env)
   (let ((rules (get-rules-resolve-symbols name))
         (user-decls (get-user-decls env)))
     `(let ((rules ',rules))

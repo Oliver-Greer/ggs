@@ -1,7 +1,9 @@
 (asdf:defsystem #:ggs
   :description "Rewrite based optimizations"
   :author "Qiantan Hong <qthong@stanford.edu>"
-  :license "MIT License")
+  :license "MIT License"
+  :depends-on (:ggs/common :ggs/eqsat :ggs/stochastic)
+  :components ((:file "ggs")))
 
 (asdf:defsystem #:ggs/common
   :serial t
@@ -9,7 +11,8 @@
                :serapeum
                :metabang-bind
                :cl-environments)
-  :components ((:file "common")))
+  :components ((:file "common")
+               (:file "util")))
 
 (asdf:defsystem #:ggs/eqsat
   :pathname "eqsat/"

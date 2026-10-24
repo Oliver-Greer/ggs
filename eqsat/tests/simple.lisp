@@ -234,7 +234,7 @@
   assoc-add assoc-mul sub-canon sub-cancel distribute factor
   d-add d-mul d-sin d-cos
   i-const i-cos i-sin i-add i-sub i-part)
-(precompile-rule-set math-all)
+(precompile-eqsat-rule-set math-all)
 
 (def-test bench.math (:suite :ggs/eqsat/bench)
   (let ((timer (make-instance 'benchmark:timer)))

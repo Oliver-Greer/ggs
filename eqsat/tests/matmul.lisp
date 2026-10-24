@@ -42,7 +42,7 @@
              (make-matmul-term '(10 14 12 9 13 16 1 6 13 14 7 7 3 14 15 15 19 12 19 8)))))
     (egraph-rebuild)
     (is (eq :saturate (run-rewrites 'assoc-matmul)))
-    (is (= 2619 (cost a)))))
+    (is (= 2619 (enode-analysis-data 'cost a)))))
 
 ;;; Benchmark
 
@@ -64,7 +64,7 @@
             (run-rewrites '(assoc-matmul -assoc-matmul)))
           (is (= 1849 (egraph-n-eclasses *egraph*)))
           (is (= 36069 (egraph-n-enodes *egraph*)))
-          (is (= 30764 (cost a))))))
+          (is (= 30764 (enode-analysis-data 'cost a))))))
     (benchmark:report timer)))
 
 (def-test bench.matmul-plain (:suite :ggs/eqsat/bench)

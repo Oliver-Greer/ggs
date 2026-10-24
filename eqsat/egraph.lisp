@@ -123,10 +123,8 @@ representativeness."
   (check-type enode enode)
   (if (enode-representative-p enode) enode (%enode-find enode)))
 
-(declaim (inline make-analysis-data merge-analysis-data get-analysis-data
+(declaim (inline make-analysis-data merge-analysis-data enode-analysis-data
                  egraph-n-enodes egraph-n-eclasses))
-
-(defvar *analysis-info-registry* (trivial-garbage:make-weak-hash-table))
 
 (defstruct analysis-info
   "Data for e-analysis."
@@ -149,11 +147,7 @@ CLASS-LIST, N-ECLASSES and FSYM-INDEX are only up-to-date after
   (n-eclasses 0 :type fixnum)
   (fsym-index (make-hash-table) :type hash-table)
   (work-list nil :type list)
-  (analysis-info-list
-   (mapcar (lambda (name) (or (gethash name *analysis-info-registry*)
-                              (error "No analysis named ~a." name)))
-           (ensure-list analyses))
-   :type list)
+  (analysis-info-list (mapcar #'compiled-analysis (ensure-list analyses)) :type list)
   (analysis-work-list nil :type list))
 
 (defvar *egraph*)
@@ -181,8 +175,8 @@ CLASS-LIST, N-ECLASSES and FSYM-INDEX are only up-to-date after
       (dolist (parent (eclass-info-parents class-info))
         (push parent (egraph-analysis-work-list g))))))
 
-(-> get-analysis-data (enode symbol) t)
-(defun get-analysis-data (enode name)
+(-> enode-analysis-data (symbol enode) t)
+(defun enode-analysis-data (name enode)
   (eclass-info-datum (or (position name (egraph-analysis-info-list *egraph*) :key #'analysis-info-name)
                          (error "Analysis ~a missing from egraph." name))
                      (enode-class-info (enode-find enode))))

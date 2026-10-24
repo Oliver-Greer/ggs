@@ -2,7 +2,7 @@
 * Example
 Define a simple problem:
 #+BEGIN_SRC lisp
-  (use-package :ggs/stochastic)
+  (in-package :ggs-user)
 
   ;; A ruleset is a named list of (LHS RHS [:guard CONDITION]) clauses.
   ;; ?x are pattern variables.
@@ -19,8 +19,8 @@ Define a simple problem:
 
 Solve an instance:
 #+BEGIN_SRC
-CL-USER> (stochastic-search '(+ (+ (- x) (+ y (- x))) (+ (- y) x)) 'cancel 'ast-size
-                            :max-time 1 :verbose t)
+GGS-USER> (stochastic-search '(+ (+ (- x) (+ y (- x))) (+ (- y) x)) 'cancel 'ast-size
+                             :max-time 1 :verbose t)
 Iteration 0/11 found 9 (+ (- X) (+ (- Y) (+ Y 0)))
 Iteration 0/13 found 7 (+ (+ (- Y) Y) (- X))
 Iteration 0/14 found 4 (+ 0 (- X))

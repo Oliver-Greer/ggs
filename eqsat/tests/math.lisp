@@ -101,7 +101,7 @@
 
 (defrw* math-all
   const-fold math-base math-diff math-integral)
-(precompile-rule-set math-all)
+(precompile-eqsat-rule-set math-all)
 
 (defun ast-size-no-d-or-i (fsym arg-costs)
   (when (every #'identity arg-costs)

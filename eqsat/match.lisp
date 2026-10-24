@@ -78,6 +78,9 @@ evaluate CONT-EXPR."
                    (t (process (list tmpl))))))
     (process tmpl)))
 
+;; FIXME: this is confusingly entirely different from
+;; `ggs/stochastic:do-matches*'.  This searches inside the entire egraph while
+;; `ggs/stochastic:do-matches*' match against a specific subject.
 (defmacro do-matches ((top-node-var pat) &body body)
   "Evaluate BODY for every PAT match in EGRAPH.
 

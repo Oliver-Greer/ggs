@@ -13,24 +13,19 @@
 (defrw assoc-matmul (matmul ?x (matmul ?y ?z)) (matmul (matmul ?x ?y) ?z))
 (defrw -assoc-matmul (matmul (matmul ?x ?y) ?z) (matmul ?x (matmul ?y ?z)))
 
-(define-analysis shape
-  :make (lambda (enode)
-          (case (enode-fsym enode)
-            (matmul (list (car (shape (enode-arg 0 enode))) (cadr (shape (enode-arg 1 enode)))))
-            (mat (map-enode-args #'enode-fsym enode))))
-  :merge (make-orp #'equal))
+(define-analysis (row :merge #'or-eql)
+  ((matmul ?x ?y) (row ?x))
+  ((mat (?row) ?x) ?row))
 
-(define-analysis cost
-  :make (lambda (enode)
-          (case (enode-fsym enode)
-            (matmul
-             (let ((x (enode-arg 0 enode))
-                   (y (enode-arg 1 enode)))
-               (+ (cost x) (cost y)
-                  (let ((mn (shape x)) (nk (shape y)))
-                    (* (car mn) (cadr mn) (cadr nk))))))
-            (t 0)))
-  :merge #'min)
+(define-analysis (col :merge #'or-eql)
+  ((matmul ?x ?y) (col ?y))
+  ((mat ?x (?col)) ?col))
+
+(define-analysis (cost :merge #'min-maybe)
+  ((matmul ?x ?y)
+   (when-let ((m (row ?x)) (n (col ?x)) (k (col ?y)))
+     (+ (cost ?x) (cost ?y) (* m n k))))
+  ((mat ?x ?y) 0))
 
 (defun make-matmul-term (dims)
   (labels ((process (dims)
@@ -42,7 +37,7 @@
     (process dims)))
 
 (def-test matmul.1 ()
-  (let* ((*egraph* (make-egraph :analyses '(cost shape)))
+  (let* ((*egraph* (make-egraph :analyses '(row col cost)))
          (a (make-term
              (make-matmul-term '(10 14 12 9 13 16 1 6 13 14 7 7 3 14 15 15 19 12 19 8)))))
     (egraph-rebuild)
@@ -60,7 +55,7 @@
 (def-test bench.matmul (:suite :ggs/eqsat/bench)
   (let ((timer (make-instance 'benchmark:timer)))
     (loop for i from 1 to 5 do
-      (let ((*egraph* (make-egraph :analyses '(cost shape))))
+      (let ((*egraph* (make-egraph :analyses '(row col cost))))
         (format t "~&Benchmark run ~a." i)
         (trivial-garbage:gc :full t)
         (let ((a (make-term (make-matmul-term (bench-matmul-dims 60)))))

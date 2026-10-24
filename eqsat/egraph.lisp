@@ -123,8 +123,8 @@ representativeness."
   (check-type enode enode)
   (if (enode-representative-p enode) enode (%enode-find enode)))
 
-(declaim (inline make-analysis-data merge-analysis-data
-                 get-analysis-data egraph-n-enodes egraph-n-eclasses))
+(declaim (inline make-analysis-data merge-analysis-data get-analysis-data
+                 egraph-n-enodes egraph-n-eclasses))
 
 (defvar *analysis-info-registry* (trivial-garbage:make-weak-hash-table))
 
@@ -132,15 +132,8 @@ representativeness."
   "Data for e-analysis."
   (name (required-argument :name) :type symbol)
   (make (required-argument :make) :type (function (enode) t))
-  (merge (required-argument :merge) :type function))
-
-(defmacro define-analysis (name &key make merge)
-  ;; Define the accessor first: MAKE and MERGE may call it
-  `(progn
-     (declaim (inline ,name))
-     (defun ,name (enode) (get-analysis-data enode ',name))
-     (setf (gethash ',name *analysis-info-registry*)
-           (make-analysis-info :name ',name :make ,make :merge ,merge))))
+  (merge (required-argument :merge) :type function)
+  (bottom nil :type t))
 
 (defstruct (egraph (:constructor make-egraph (&key analyses)))
   "HASH-CONS stores all canonical enodes. CLASS-LIST lists all
@@ -173,10 +166,11 @@ CLASS-LIST, N-ECLASSES and FSYM-INDEX are only up-to-date after
             (funcall (analysis-info-make (pop analysis-info-list)) enode)))))
 
 (defun merge-analysis-data (eclass new-class-info)
-  (let* ((data-changed nil)
+  (let* ((g *egraph*)
+         (data-changed nil)
          (class-info (enode-class-info eclass)))
     (declare (type eclass-info class-info))
-    (loop for analysis-info in (egraph-analysis-info-list *egraph*)
+    (loop for analysis-info in (egraph-analysis-info-list g)
           for i from +eclass-info-data-offset+ below (length class-info)
           for old-data = (svref class-info i)
           for new-data = (funcall (analysis-info-merge analysis-info)
@@ -184,7 +178,8 @@ CLASS-LIST, N-ECLASSES and FSYM-INDEX are only up-to-date after
           do (setf (svref class-info i) new-data
                    data-changed (or data-changed (not (eq old-data new-data)))))
     (when data-changed
-      (push eclass (egraph-analysis-work-list *egraph*)))))
+      (dolist (parent (eclass-info-parents class-info))
+        (push parent (egraph-analysis-work-list g))))))
 
 (-> get-analysis-data (enode symbol) t)
 (defun get-analysis-data (enode name)
@@ -213,15 +208,17 @@ CLASS-LIST, N-ECLASSES and FSYM-INDEX are only up-to-date after
                               :n-parents 0 :parents nil :nodes nil
                               :n-args (length (egraph-analysis-info-list g))))
                 (enode (copy-seq key-node)))
-           (loop for i of-type fixnum from +eclass-info-data-offset+ below (length eclass-info)
-                 do (setf (svref eclass-info i) 'unbound))
            (setf (eclass-info-nodes eclass-info) (list enode)
                  (enode-parent enode) nil
                  (enode-class-info enode) eclass-info)
            (do-enode-args (arg enode)
              (push enode (eclass-info-parents (enode-class-info arg)))
              (incf (eclass-info-n-parents (enode-class-info arg))))
-           (make-analysis-data eclass-info enode))))))
+           (when-let (analyses (egraph-analysis-info-list g))
+             (loop for a in analyses
+                   for i of-type fixnum from 0
+                   do (setf (eclass-info-datum i eclass-info) (analysis-info-bottom a)))
+             (push enode (egraph-analysis-work-list g))))))))
 
 (-> %intern-merge-enode (enode enode) null)
 (defun %intern-merge-enode (eclass key-node)
@@ -238,16 +235,11 @@ CLASS-LIST, N-ECLASSES and FSYM-INDEX are only up-to-date after
               (push enode (eclass-info-nodes info))
               (do-enode-args (arg enode)
                 (push enode (eclass-info-parents (enode-class-info arg)))
-                (incf (eclass-info-n-parents (enode-class-info arg))))))
-      (if existing-p
-          (%enode-merge enode eclass)
-          (when (egraph-analysis-info-list g)
-            (let ((new-class-info (make-eclass-info
-                                   :n-args (length (egraph-analysis-info-list g)))))
-              (declare (dynamic-extent new-class-info))
-              (make-analysis-data new-class-info enode)
-              (merge-analysis-data eclass new-class-info)
-              nil))))))
+                (incf (eclass-info-n-parents (enode-class-info arg))))
+              (when (egraph-analysis-info-list g)
+                (push enode (egraph-analysis-work-list g)))))
+      (when existing-p
+        (%enode-merge enode eclass)))))
 
 (defmacro with-key-node (key-node-var (fsym &rest args) &body body)
   ;; internal, may evaluate FSYM and ARGS multiple times, please only pass in
@@ -272,6 +264,7 @@ CLASS-LIST, N-ECLASSES and FSYM-INDEX are only up-to-date after
 
 (declaim (inline make-enode))
 (defun make-enode (fsym &rest args)
+  "Make an enode inside `*egraph*'."
   (dolist (arg args) (check-type arg enode))
   (let ((key-node (%make-enode :fsym fsym :args args)))
     (declare (dynamic-extent key-node))
@@ -357,23 +350,6 @@ CLASS-LIST, N-ECLASSES and FSYM-INDEX are only up-to-date after
         (canonicalize-key-node key-node)
         (%intern-merge-enode enode key-node))))
 
-  ;; Update analysis
-  (loop
-    (let ((enode (pop (egraph-analysis-work-list g))))
-      (unless enode (return))
-      (when (enode-representative-p enode)
-        (let ((info (enode-class-info enode)))
-          (dolist (parent (eclass-info-parents info))
-            (when (plusp (enode-canonical-flag parent))
-              (let ((new-class-info (make-eclass-info
-                                     :n-args (length (egraph-analysis-info-list g))))
-                    (eclass (enode-find parent)))
-                (declare (dynamic-extent new-class-info))
-                (loop for i of-type fixnum from +eclass-info-data-offset+ below (length new-class-info)
-                      do (setf (svref new-class-info i) 'unbound))
-                (make-analysis-data new-class-info parent)
-                (merge-analysis-data eclass new-class-info))))))))
-
   ;; Build eclass index by collecting all representative enodes of canonical
   ;; enodes in `egraph-hash-cons'. Note we really need to `enode-find' here,
   ;; because canon-enodes might be non-rep, while rep-enodes might not be canon
@@ -427,7 +403,23 @@ CLASS-LIST, N-ECLASSES and FSYM-INDEX are only up-to-date after
           (push node (cdr entry))))
       (setf (eclass-info-fsym-index info) alist)
       (loop for (fsym . nodes) in alist
-            do (push nodes (gethash fsym (egraph-fsym-index g)))))))
+            do (push nodes (gethash fsym (egraph-fsym-index g))))))
+
+  ;; Update analysis. This comes last so that analyses can match against
+  ;; up-to-date indexes
+  (loop
+    ;; Do it in oldest first order (arguments before parent). This saves
+    ;; redundant work for analysis specifically (but not so much for, say,
+    ;; upward propagation).
+    (let ((batch (shiftf (egraph-analysis-work-list g) nil)))
+      (unless batch (return))
+      (dolist (enode (nreverse batch))
+        (when (plusp (enode-canonical-flag enode))
+          (let ((new-class-info (make-eclass-info
+                                 :n-args (length (egraph-analysis-info-list g)))))
+            (declare (dynamic-extent new-class-info))
+            (make-analysis-data new-class-info enode)
+            (merge-analysis-data (enode-find enode) new-class-info)))))))
 
 ;;; Utils
 
@@ -500,3 +492,17 @@ Only contains canonical enodes after `egraph-rebuild'."
 
 (defun egraph-n-enodes (egraph)
   (hash-cons-count (egraph-hash-cons egraph)))
+
+(defun make-term (term)
+  "Make some enodes to represent TERM in `*egraph*'.
+
+Currently no effort is spent optimizing this, use it only for convenience.
+Use `yield-rewrite' and `make-enode' for serious business."
+  (flet ((check-var (maybe-var)
+           (when (var-p maybe-var)
+             (error "Variable ~a in ~a" maybe-var term))
+           maybe-var))
+    (cond ((consp term)
+           (apply #'make-enode (check-var (car term)) (mapcar #'make-term (cdr term))))
+          ((enode-p term) term)
+          (t (make-enode (check-var term))))))

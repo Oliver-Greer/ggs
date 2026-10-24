@@ -25,9 +25,9 @@
   :components ((:file "package")
                (:file "egraph")
                (:file "match")
+               (:file "analysis")
                (:file "run")
-               (:file "extract")
-               (:file "user"))
+               (:file "extract"))
   :in-order-to ((test-op (test-op "ggs/eqsat/tests"))))
 
 (asdf:defsystem #:ggs/stochastic

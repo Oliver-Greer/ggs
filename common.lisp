@@ -53,7 +53,7 @@ Backends should `macrolet' bind this placeholder inside `defrw', `defrw*' and `d
 (defmacro define-analysis ((name &key merge bottom) &body clauses)
   "Define analysis NAME and a macro NAME that takes a single term argument and
 returns its NAME analysis value. The macro can only be used inside `defrw',
-`defrw*' or `define-analysis' that is or includes NAME.
+`defrw*' or `define-analysis'.
 
 MERGE should evaluate to a function that takes two arguments and return their
 lattice merge, and BOTTOM should evaluate to the lattice bottom element.

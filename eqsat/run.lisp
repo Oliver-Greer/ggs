@@ -18,12 +18,12 @@
        (when match-limit
          (let ((remaining match-limit))
            (declare (type fixnum remaining))
-           (do-matches (top-node ,(car rule))
+           (do-match-all (top-node ,(car rule))
              (decf remaining)
              (when (minusp remaining)
                (error 'match-limit-exceeded
                       :name ',name :rule ',rule :match-limit match-limit)))))
-       (do-matches (top-node ,(car rule))
+       (do-match-all (top-node ,(car rule))
          (macrolet ((yield-rewrite (rhs)
                       `(enode-merge top-node ,(expand-template rhs))))
            (locally (declare ,@user-decls) ,@(cdr rule)))))))

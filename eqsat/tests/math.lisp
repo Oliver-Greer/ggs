@@ -113,13 +113,13 @@
 (defmacro def-math-test (name () lhs rhs)
   `(def-test ,name ()
      (let* ((*egraph* (make-egraph))
-            (lhs (make-term ',lhs)))
+            (lhs (term-enode ',lhs)))
        (egraph-rebuild)
        (run-rewrites 'math-all :max-iter 10 :initial-match-limit 1000 :prune-constant #'numberp)
        ;; enodes are cyclic (:type vector) structs; bound printing so a failing
        ;; IS doesn't overflow the stack rendering the enode (see diff-power-harder).
        (let ((*print-circle* t) (*print-level* 6) (*print-length* 12))
-         (is (eq (enode-find (make-term ',rhs)) (enode-find lhs)))))))
+         (is (eq (enode-find (term-enode ',rhs)) (enode-find lhs)))))))
 
 (def-math-test math.simplify-root ()
   (/ 1 (- (/ (+ 1 (sqrt five)) 2)
@@ -134,8 +134,8 @@
 
 (def-test math.diff-power-harder ()
   (let* ((*egraph* (make-egraph))
-         (a (make-term '(d x (- (pow x 3) (* 7 (pow x 2))))))
-         (b (make-term '(* x (- (* 3 x) 14)))))
+         (a (term-enode '(d x (- (pow x 3) (* 7 (pow x 2))))))
+         (b (term-enode '(* x (- (* 3 x) 14)))))
     (egraph-rebuild)
     (run-rewrites 'math-all :max-iter 10 :initial-match-limit 1000 :prune-constant #'numberp)
     (let ((*print-circle* t) (*print-level* 6) (*print-length* 12))
@@ -147,7 +147,7 @@
       (let ((*egraph* (make-egraph)))
         (format t "~&Benchmark run ~a." i)
         (trivial-garbage:gc :full t)
-        (make-term '(d x (- (pow x 3) (* 7 (pow x 2)))))
+        (term-enode '(d x (- (pow x 3) (* 7 (pow x 2)))))
         (egraph-rebuild)
         (benchmark:with-sampling (timer)
           (run-rewrites 'math-all :max-iter 15 :prune-constant #'numberp))))
@@ -167,7 +167,7 @@
 
 (def-test math.lp-extract ()
   (let* ((*egraph* (make-egraph :analyses 'ast-size-no-d-or-i))
-         (a (make-term '(pow (+ x (+ x x)) (+ x x)))))
+         (a (term-enode '(pow (+ x (+ x x)) (+ x x)))))
     (egraph-rebuild)
     (run-rewrites 'math-all :max-iter 10 :initial-match-limit 1000 :prune-constant #'numberp)
     (is (member (greedy-extract a 'ast-size-no-d-or-i)

@@ -166,7 +166,7 @@
               `(when (and ,@checks)
                  ,cont-expr)))))
 
-(defmacro do-matches* ((top-node-var offset) &body clauses)
+(defmacro do-match* ((top-node-var offset) &body clauses)
   `(progn ,@(expand-match offset
                           (list top-node-var)
                           (mapcar (lambda (clause)

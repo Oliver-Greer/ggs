@@ -98,8 +98,8 @@
 
 (def-test simple.1 ()
   (let* ((*egraph* (make-egraph :analyses 'ast-size))
-         (a (make-term '(* 0 42)))
-         (b (make-term 0)))
+         (a (term-enode '(* 0 42)))
+         (b (term-enode 0)))
     (egraph-rebuild)
     (is (eq :saturate
             (run-rewrites '(commute-add commute-mul add-0 mul-0 mul-1)
@@ -109,8 +109,8 @@
 
 (def-test simple.2 ()
   (let* ((*egraph* (make-egraph :analyses 'ast-size))
-         (a (make-term '(+ 0 (* 1 foo))))
-         (b (make-term 'foo)))
+         (a (term-enode '(+ 0 (* 1 foo))))
+         (b (term-enode 'foo)))
     (egraph-rebuild)
     (is (eq :saturate
             (run-rewrites '(commute-add commute-mul add-0 mul-0 mul-1)
@@ -123,7 +123,7 @@
 
 (def-test ac ()
   (let ((*egraph* (make-egraph)))
-    (make-term '(+ 0 (+ 1 (+ 2 (+ 3 (+ 4 (+ 5 (+ 6 7))))))))
+    (term-enode '(+ 0 (+ 1 (+ 2 (+ 3 (+ 4 (+ 5 (+ 6 7))))))))
     (egraph-rebuild)
     (is (eq :saturate
             (run-rewrites '(commute-add assoc-add)
@@ -136,9 +136,9 @@
 
 (def-test nonlinear ()
   (let* ((*egraph* (make-egraph :analyses 'ast-size))
-         (a (make-term '(- (+ a b) (+ b a))))
-         (b (make-term '(- (+ a a) (* 2 a))))
-         (c (make-term '(+ a (- b (* 1 b))))))
+         (a (term-enode '(- (+ a b) (+ b a))))
+         (b (term-enode '(- (+ a a) (* 2 a))))
+         (c (term-enode '(+ a (- b (* 1 b))))))
     (egraph-rebuild)
     (is (eq :saturate
             (run-rewrites '(sub-cancel add-2
@@ -153,11 +153,11 @@
 
 (def-test ground ()
   (let* ((*egraph* (make-egraph :analyses 'ast-size))
-         (a (make-term '(d a (sin a))))
-         (b (make-term '(d (+ a b) (sin (+ b a)))))
-         (b-1 (make-term '(cos (+ a b))))
-         (c (make-term '(d a (d a (sin a)))))
-         (c-1 (make-term '(* -1 (sin a)))))
+         (a (term-enode '(d a (sin a))))
+         (b (term-enode '(d (+ a b) (sin (+ b a)))))
+         (b-1 (term-enode '(cos (+ a b))))
+         (c (term-enode '(d a (d a (sin a)))))
+         (c-1 (term-enode '(* -1 (sin a)))))
     (egraph-rebuild)
     (is (eq :saturate
             (run-rewrites '(d-sin d-cos
@@ -171,8 +171,8 @@
 
 (def-test single-var-pat ()
   (let* ((*egraph* (make-egraph))
-         (a (make-term 'a))
-         (b (make-term '(+ (+ (+ a 0) 0) 0))))
+         (a (term-enode 'a))
+         (b (term-enode '(+ (+ (+ a 0) 0) 0))))
     (egraph-rebuild)
     (is (eq :saturate
             (run-rewrites '-add-0 :check t :max-iter 10)))
@@ -190,9 +190,9 @@
 
 (def-test const-fold ()
   (let* ((*egraph* (make-egraph :analyses 'ast-size))
-         (a (make-term '(+ 3 (+ 2 a))))
-         (b (make-term '(+ a 5)))
-         (c (make-term '(+ 2 (* 3 5)))))
+         (a (term-enode '(+ 3 (+ 2 a))))
+         (b (term-enode '(+ a 5)))
+         (c (term-enode '(+ 2 (* 3 5)))))
     (egraph-rebuild)
     (is (eq :saturate
             (run-rewrites '(commute-add commute-mul assoc-add assoc-mul const-fold)
@@ -207,10 +207,10 @@
 
 (def-test deriv ()
   (let* ((*egraph* (make-egraph))
-         (a (make-term '(+ (d x (+ 1 2)) (d y y)))))
+         (a (term-enode '(+ (d x (+ 1 2)) (d y y)))))
     (egraph-rebuild)
     (run-rewrites '(commute-add assoc-add d-var d-const const-fold) :max-iter 10)
-    (is (eq (enode-find (make-term 1)) (enode-find a)))))
+    (is (eq (enode-find (term-enode 1)) (enode-find a)))))
 
 ;;; Micro benchmark
 
@@ -242,13 +242,13 @@
       (let ((*egraph* (make-egraph)))
         (format t "~&Benchmark run ~a." i)
         (trivial-garbage:gc :full t)
-        (make-term '(i x (ln x)))
-        (make-term '(i x (+ x (cos x))))
-        (make-term '(i x (* (cos x) x)))
-        (make-term '(d x (+ 1 (* 2 x))))
-        (make-term '(d x (- (pow x 3) (* 7 (pow x 2)))))
-        (make-term '(+ (* y (+ x y)) (- (+ x 2) (+ x x))))
-        (make-term '(/ 1 (- (/ (+ 1 (sqrt five)) 2) (/ (- 1 (sqrt five)) 2))))
+        (term-enode '(i x (ln x)))
+        (term-enode '(i x (+ x (cos x))))
+        (term-enode '(i x (* (cos x) x)))
+        (term-enode '(d x (+ 1 (* 2 x))))
+        (term-enode '(d x (- (pow x 3) (* 7 (pow x 2)))))
+        (term-enode '(+ (* y (+ x y)) (- (+ x 2) (+ x x))))
+        (term-enode '(/ 1 (- (/ (+ 1 (sqrt five)) 2) (/ (- 1 (sqrt five)) 2))))
         (egraph-rebuild)
         (benchmark:with-sampling (timer)
           (run-rewrites 'math-all :max-iter 11))
@@ -262,7 +262,7 @@
       (let ((*egraph* (make-egraph :analyses 'const)))
         (format t "~&Benchmark run ~a." i)
         (trivial-garbage:gc :full t)
-        (make-term '(+ 0 (+ 1 (+ 2 (+ 3 (+ 4 (+ 5 (+ 6 (+ 7 (+ x (+ y (+ z w))))))))))))
+        (term-enode '(+ 0 (+ 1 (+ 2 (+ 3 (+ 4 (+ 5 (+ 6 (+ 7 (+ x (+ y (+ z w))))))))))))
         (egraph-rebuild)
         (benchmark:with-sampling (timer)
           (run-rewrites '(commute-add assoc-add)))

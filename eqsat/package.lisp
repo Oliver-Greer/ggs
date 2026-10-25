@@ -8,9 +8,8 @@
            #:enode-representative-p #:enode-canonical-p #:enode-eclass-info
            #:*egraph* #:enode-find #:enode-merge #:egraph-rebuild #:check-egraph
            #:egraph-n-enodes #:egraph-n-eclasses #:enode-analysis-data
-           #:do-matches #:precompile-eqsat-rule-set #:make-term #:run-rewrites
-           #:build-term #:graph-cost #:tree-cost
-           #:greedy-select #:greedy-extract #:lp-select #:lp-extract))
+           #:precompile-eqsat-rule-set #:term-enode #:run-rewrites
+           #:build-term #:greedy-select #:greedy-extract #:lp-select #:lp-extract))
 
 (serapeum:eval-always
   (trivial-package-local-nicknames:add-package-local-nickname

@@ -38,7 +38,7 @@
 
 (def-test matmul.1 ()
   (let* ((*egraph* (make-egraph :analyses '(row col cost)))
-         (a (make-term
+         (a (term-enode
              (make-matmul-term '(10 14 12 9 13 16 1 6 13 14 7 7 3 14 15 15 19 12 19 8)))))
     (egraph-rebuild)
     (is (eq :saturate (run-rewrites 'assoc-matmul)))
@@ -58,7 +58,7 @@
       (let ((*egraph* (make-egraph :analyses '(row col cost))))
         (format t "~&Benchmark run ~a." i)
         (trivial-garbage:gc :full t)
-        (let ((a (make-term (make-matmul-term (bench-matmul-dims 60)))))
+        (let ((a (term-enode (make-matmul-term (bench-matmul-dims 60)))))
           (egraph-rebuild)
           (benchmark:with-sampling (timer)
             (run-rewrites '(assoc-matmul -assoc-matmul)))
@@ -74,7 +74,7 @@
       (let ((*egraph* (make-egraph)))
         (format t "~&Benchmark run ~a." i)
         (trivial-garbage:gc :full t)
-        (make-term (make-matmul-term (bench-matmul-dims 80)))
+        (term-enode (make-matmul-term (bench-matmul-dims 80)))
         (egraph-rebuild)
         (benchmark:with-sampling (timer)
           (is (eq :saturate (run-rewrites '(assoc-matmul -assoc-matmul)))))

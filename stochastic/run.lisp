@@ -41,7 +41,7 @@
           (remove-if-not (lambda (lhs) (if (consp lhs) (cdr lhs) (var-p lhs)))
                          rules :key #'car))
          (compound-matcher
-          (macroexpand-1 `(do-matches* (subject ,offset)
+          (macroexpand-1 `(do-match* (subject ,offset)
                             ,@(mapcar #'wrap-user-decls compound-rules))))
          (constant-rules
           (remove-if-not (lambda (lhs)
@@ -50,7 +50,7 @@
                                (and (null (cddr lhs)) (seq-var-p (cadr lhs)))))
                          rules :key #'car))
          (constant-matcher
-          (macroexpand-1 `(do-matches* (arg ,offset)
+          (macroexpand-1 `(do-match* (arg ,offset)
                             ,@(mapcar #'wrap-user-decls constant-rules)))))
 
     `(compute-weights

@@ -1,12 +1,13 @@
 (uiop:define-package :ggs/util
-    (:use #:cl #:alexandria)
+    (:use #:cl #:alexandria #:ggs/common)
   (:import-from #:serapeum #:with-collector #:string-prefix-p #:eval-always #:->
                 #:partition #:lret)
   (:import-from #:metabang-bind #:bind)
   (:import-from #:ggs/common #:get-analysis-data)
   (:export #:define-variadic-structure #:do-variadic-slots #:n-variadic-slots #:get-variadic-slot
            #:var-p #:seq-var-p #:gensym-1
-           #:get-rules #:get-analysis #:get-user-decls #:get-analysis-data))
+           #:get-rules #:get-analysis #:get-user-decls #:get-analysis-data
+           #:warn-compile-rule-set))
 
 (in-package :ggs/util)
 
@@ -161,3 +162,8 @@ alike"
 (defun get-user-decls (env &optional (policies '(speed safety)))
   `((optimize ,@(remove-if-not (lambda (policy) (member (car policy) policies))
                                (cl-environments:declaration-information 'optimize env)))))
+
+(defun warn-compile-rule-set (precompile-form)
+  (when *warn-runtime-compile*
+    (warn "~@<Compiling a rule set at runtime, you can precompile it with ~S~:@>"
+          precompile-form)))

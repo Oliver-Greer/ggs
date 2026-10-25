@@ -45,13 +45,18 @@
        ',name)))
 
 (defun compiled-rules (name)
-  (let ((user-decls (get-user-decls nil)))
+  (let ((user-decls (get-user-decls nil))
+        (warned nil))
     (mappend (lambda (rule)
                (if (symbolp rule)
                    (compiled-rules rule)
-                   (list
-                    (ensure-gethash (list name rule user-decls) *compiled-rules*
-                                    (compile nil (compute-rule-lambda name rule user-decls))))))
+                   (list (ensure-gethash
+                          (list name rule user-decls) *compiled-rules*
+                          (progn
+                            (unless warned
+                              (warn-compile-rule-set `(precompile-eqsat-rule-set ,name))
+                              (setq warned t))
+                            (compile nil (compute-rule-lambda name rule user-decls)))))))
              (get-rules name))))
 
 (defun run-rewrites (rule-sets &key max-iter max-time check verbose

@@ -12,8 +12,10 @@
                       (if args
                           (if (var-p (car args))
                               `(let ((,(car args) (enode-arg ,i top-enode)))
+                                 (declare (ignorable ,(car args)))
                                  ,(process (cdr args) (1+ i)))
                               `(let ((arg-enode (enode-arg ,i top-enode)))
+                                 (declare (ignorable arg-enode))
                                  ,(expand-match
                                    (list 'arg-enode) (parse-pattern (car args) 'arg-enode)
                                    (process (cdr args) (1+ i)))))

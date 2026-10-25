@@ -67,7 +67,6 @@ analysis value for the term matching PAT."
 
 Can only be used inside `defrw', `defrw*' or `define-analysis'."
                 name)
-       (declare (ignore term))
        `(get-analysis-data ,',name ,term))
      (eval-always
        (setf (get ',name 'analysis)

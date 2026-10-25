@@ -5,7 +5,7 @@
   (:import-from #:metabang-bind #:bind)
   (:import-from #:ggs/common #:get-analysis-data)
   (:export #:define-variadic-structure #:do-variadic-slots #:n-variadic-slots #:get-variadic-slot
-           #:var-p #:seq-var-p #:gensym-1
+           #:var-p #:seq-var-p #:gensym-1 #:case/bind
            #:get-rules #:get-analysis #:get-user-decls #:get-analysis-data
            #:warn-compile-rule-set))
 
@@ -148,6 +148,21 @@ alike"
 
 (defun gensym-1 (thing)
   (make-gensym (princ-to-string thing)))
+
+(defmacro case/bind (keyform &body cases)
+  "Like CASE, but also support ((?VAR) ...) clauses, which run before
+everything else and bind ?VAR."
+  (multiple-value-bind (bind-clauses real-cases)
+      (partition (lambda (case) (and (consp (car case)) (var-p (caar case))))
+                 cases)
+    (let ((bind-forms (mapcar (lambda (clause)
+                                `(let ((,(caar clause) ,keyform))
+                                   ,@(cdr clause)))
+                              bind-clauses)))
+      (cond ((and bind-forms real-cases)
+             `(progn ,@bind-forms (case ,keyform ,@real-cases)))
+            (bind-forms `(progn ,@bind-forms))
+            (real-cases `(case ,keyform ,@real-cases))))))
 
 (defun get-rules (name)
   (lret ((rules (get name 'ggs/common::rules '%unbound)))

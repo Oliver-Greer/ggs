@@ -15,65 +15,30 @@
                  (t (gethash class memo)))))
       (process (enode-find enode)))))
 
-(defun graph-cost (enode selections cost-fn)
-  (let ((memo (make-hash-table))
-        (cost 0))
-    (labels ((process (class)
-               (ensure-gethash
-                class memo
-                (let ((enode (gethash class selections)))
-                  (incf cost (funcall cost-fn enode))
-                  (do-enode-args (arg enode)
-                    (process arg))
-                  t))))
-      (process (enode-find enode))
-      cost)))
+;; FIXME: The extraction functions can take analysis not in `*egraph*', as long
+;; as they don't *use* analysis not in `*egraph*' (including themselves! so they
+;; cannot be recursive). This should either be fixed or documented.
 
-(defun tree-cost (enode selections cost-fn)
-  (let ((memo (make-hash-table)))
-    (labels ((process (class)
-               (ensure-gethash
-                class memo
-                (let ((enode (gethash class selections))
-                      (cost (funcall cost-fn enode)))
-                  (do-enode-args (arg enode cost)
-                    (incf cost (process arg)))))))
-      (process (enode-find enode)))))
+(defun greedy-select (cost-analysis)
+  (let ((analysis-make (analysis-info-make (compiled-analysis cost-analysis)))
+        (selections (make-hash-table))) ; map eclass to enode
+    (dolist (class (egraph-class-list *egraph*))
+      (let (best-cost best-node)
+        (loop for node in (eclass-info-nodes (enode-class-info class))
+              for cost = (funcall analysis-make node)
+              when (or (not best-cost) (and cost (< cost best-cost)))
+                do (setf best-cost cost best-node node))
+        (setf (gethash class selections) best-node)))
+    selections))
 
-(defun greedy-select (cost-fn)
-  (let ((costs (make-hash-table))        ; map eclass to cost
-        (selections (make-hash-table)))  ; map eclass to enode
-    (loop
-      (let (dirty)
-        (dolist (class (egraph-class-list *egraph*))
-          (let ((selection (gethash class selections))
-                (cost (gethash class costs)))
-            (dolist (enode (list-enodes class))
-              (let ((new-cost
-                      (funcall cost-fn enode
-                               (map-enode-args (rcurry #'gethash costs)
-                                               enode))))
-                (when (if cost (and new-cost (< new-cost cost))
-                          new-cost)
-                  (setf selection enode
-                        cost new-cost
-                        dirty t))))
-            (setf (gethash class selections) selection
-                  (gethash class costs) cost)))
-        (unless dirty (return))))
-    (values selections costs)))
+(defun greedy-extract (enode cost-analysis)
+  "Greedy extract a term for ENODE from `*egraph*' using COST-ANALYSIS."
+  (build-term enode (greedy-select cost-analysis)))
 
-(defun greedy-extract (enode cost-fn)
-  "Greedy extract a term for ENODE from `*egraph*' using COST-FN.
-
-COST-FN should accept 2 arguments: the enode and a list of costs for each
-argument eclass. It should return a number. The cost of an extraction is the
-cost of its root node."
-  (build-term enode (greedy-select cost-fn)))
-
-(defun lp-select (enode cost-fn)
+(defun lp-select (enode weight-analysis)
   (let ((class-vars (make-hash-table))  ; map eclass to lp var or 'visiting
         (enode-vars (make-hash-table))
+        (analysis-make (analysis-info-make (compiled-analysis weight-analysis)))
         (objective-terms nil)
         (constraints nil))
     (labels ((visit-class (class)
@@ -93,7 +58,7 @@ cost of its root node."
                ;; to a visiting eclass, therefore this enode is not processed
                (do-enode-args (class enode)
                  (when (eq (gethash class class-vars) 'visiting) (return-from visit-enode)))
-               (lret ((cost (funcall cost-fn enode))
+               (lret ((cost (funcall analysis-make enode))
                       (var (gensym-1 (enode-fsym enode))))
                  (setf (gethash enode enode-vars) var)
                  (push `(lp:* ,cost ,var) objective-terms)
@@ -115,10 +80,9 @@ cost of its root node."
            (setf (gethash (enode-find enode) selections) enode)))
        enode-vars))))
 
-(defun lp-extract (enode cost-fn)
+(defun lp-extract (enode weight-analysis)
   "Extract a term for ENODE from `*egraph*' using ILP.
 
-COST-FN should accept 1 argument: the enode. It should return a number. The cost
-of an extraction is the sum of costs of the enodes it contains. Note that
-different from `greedy-extract', the cost model is implicitly additive."
-  (build-term enode (lp-select enode cost-fn)))
+WEIGHT-ANALYSIS should compute the weight of each enode. Note that different
+from `greedy-extract', the cost model is implicitly additive."
+  (build-term enode (lp-select enode weight-analysis)))

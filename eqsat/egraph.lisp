@@ -123,7 +123,7 @@ representativeness."
   (check-type enode enode)
   (if (enode-representative-p enode) enode (%enode-find enode)))
 
-(declaim (inline make-analysis-data merge-analysis-data enode-analysis-data
+(declaim (inline make-analysis-data merge-analysis-data find-analysis enode-analysis-data
                  egraph-n-enodes egraph-n-eclasses))
 
 (defstruct analysis-info
@@ -154,10 +154,10 @@ CLASS-LIST, N-ECLASSES and FSYM-INDEX are only up-to-date after
 (setf (documentation '*egraph* 'variable) "Current egraph under operation.")
 
 (defun make-analysis-data (eclass-info enode)
-  (let ((analysis-info-list (egraph-analysis-info-list *egraph*)))
-    (dotimes (i (eclass-info-n-data eclass-info))
-      (setf (eclass-info-datum i eclass-info)
-            (funcall (analysis-info-make (pop analysis-info-list)) enode)))))
+  (loop for analysis-info in (egraph-analysis-info-list *egraph*)
+        for i of-type fixnum from 0
+        do (setf (eclass-info-datum i eclass-info)
+                 (funcall (analysis-info-make analysis-info) enode))))
 
 (defun merge-analysis-data (eclass new-class-info)
   (let* ((g *egraph*)
@@ -175,11 +175,17 @@ CLASS-LIST, N-ECLASSES and FSYM-INDEX are only up-to-date after
       (dolist (parent (eclass-info-parents class-info))
         (push parent (egraph-analysis-work-list g))))))
 
+(-> find-analysis (symbol) (values analysis-info fixnum))
+(defun find-analysis (name)
+  (loop for analysis in (egraph-analysis-info-list *egraph*)
+        for i of-type fixnum from 0
+        when (eq name (analysis-info-name analysis))
+          do (return (values analysis i))
+        finally (error "Analysis ~a missing from egraph." name)))
+
 (-> enode-analysis-data (symbol enode) t)
 (defun enode-analysis-data (name enode)
-  (eclass-info-datum (or (position name (egraph-analysis-info-list *egraph*) :key #'analysis-info-name)
-                         (error "Analysis ~a missing from egraph." name))
-                     (enode-class-info (enode-find enode))))
+  (eclass-info-datum (nth-value 1 (find-analysis name)) (enode-class-info (enode-find enode))))
 
 (declaim (inline canonicalize-key-node))
 (defun canonicalize-key-node (key-node)

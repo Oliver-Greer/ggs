@@ -6,21 +6,6 @@
                    (declare (ignorable ,old))
                    ,(lastcar pat-row)))))
 
-(defmacro case/bind (keyform &body cases)
-  "Like CASE, but also support ((?VAR) ...) clauses, which run before
-everything else and bind ?VAR."
-  (multiple-value-bind (bind-clauses real-cases)
-      (partition (lambda (case) (and (consp (car case)) (var-p (caar case))))
-                 cases)
-    (let ((bind-forms (mapcar (lambda (clause)
-                                `(let ((,(caar clause) ,keyform))
-                                   ,@(cdr clause)))
-                              bind-clauses)))
-      (cond ((and bind-forms real-cases)
-             `(progn ,@bind-forms (case ,keyform ,@real-cases)))
-            (bind-forms `(progn ,@bind-forms))
-            (real-cases `(case ,keyform ,@real-cases))))))
-
 (declaim (inline variadic-slots-between variadic-slot-from-end))
 (defun variadic-slots-between (from-start from-end offset node)
   (loop for i from (+ offset from-start)

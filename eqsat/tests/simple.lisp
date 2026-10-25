@@ -91,13 +91,13 @@
 (defrw mul-0 (* ?a 0) 0)
 (defrw mul-1 (* ?a 1) ?a)
 
-(defun ast-size (fsym arg-costs)
-  (declare (ignore fsym))
-  (when (every #'identity arg-costs)
-    (1+ (reduce #'+ arg-costs))))
+(define-analysis (ast-size :merge #'min-maybe)
+  ((?f ?x ?y) (+ 1 (ast-size ?x) (ast-size ?y)))
+  ((?f ?x) (+ 1 (ast-size ?x)))
+  ((?f) 1))
 
 (def-test simple.1 ()
-  (let* ((*egraph* (make-egraph))
+  (let* ((*egraph* (make-egraph :analyses 'ast-size))
          (a (make-term '(* 0 42)))
          (b (make-term 0)))
     (egraph-rebuild)
@@ -105,10 +105,10 @@
             (run-rewrites '(commute-add commute-mul add-0 mul-0 mul-1)
                           :check t :max-iter 10)))
     (is (eq (enode-find a) (enode-find b)))
-    (is (equal 0 (greedy-extract a #'ast-size)))))
+    (is (equal 0 (greedy-extract a 'ast-size)))))
 
 (def-test simple.2 ()
-  (let* ((*egraph* (make-egraph))
+  (let* ((*egraph* (make-egraph :analyses 'ast-size))
          (a (make-term '(+ 0 (* 1 foo))))
          (b (make-term 'foo)))
     (egraph-rebuild)
@@ -116,7 +116,7 @@
             (run-rewrites '(commute-add commute-mul add-0 mul-0 mul-1)
                           :check t :max-iter 10)))
     (is (eq (enode-find a) (enode-find b)))
-    (is (equal 'foo (greedy-extract a #'ast-size)))))
+    (is (equal 'foo (greedy-extract a 'ast-size)))))
 
 (defrw assoc-add (+ ?a (+ ?b ?c)) (+ (+ ?a ?b) ?c))
 (defrw assoc-mul (* ?a (* ?b ?c)) (* (* ?a ?b) ?c))
@@ -135,7 +135,7 @@
 (defrw add-2 (+ ?a ?a) (* 2 ?a))
 
 (def-test nonlinear ()
-  (let* ((*egraph* (make-egraph))
+  (let* ((*egraph* (make-egraph :analyses 'ast-size))
          (a (make-term '(- (+ a b) (+ b a))))
          (b (make-term '(- (+ a a) (* 2 a))))
          (c (make-term '(+ a (- b (* 1 b))))))
@@ -144,15 +144,15 @@
             (run-rewrites '(sub-cancel add-2
                             commute-add commute-mul add-0 mul-0 mul-1)
                           :check t :max-iter 10)))
-    (is (equal 0 (greedy-extract a #'ast-size)))
-    (is (equal 0 (greedy-extract b #'ast-size)))
-    (is (equal 'a (greedy-extract c #'ast-size)))))
+    (is (equal 0 (greedy-extract a 'ast-size)))
+    (is (equal 0 (greedy-extract b 'ast-size)))
+    (is (equal 'a (greedy-extract c 'ast-size)))))
 
 (defrw d-sin (d ?x (sin ?x)) (cos ?x))
 (defrw d-cos (d ?x (cos ?x)) (* -1 (sin ?x)))
 
 (def-test ground ()
-  (let* ((*egraph* (make-egraph))
+  (let* ((*egraph* (make-egraph :analyses 'ast-size))
          (a (make-term '(d a (sin a))))
          (b (make-term '(d (+ a b) (sin (+ b a)))))
          (b-1 (make-term '(cos (+ a b))))
@@ -163,7 +163,7 @@
             (run-rewrites '(d-sin d-cos
                             commute-add commute-mul add-0 mul-0 mul-1)
                           :check t :max-iter 10)))
-    (is (equal '(cos a) (greedy-extract a #'ast-size)))
+    (is (equal '(cos a) (greedy-extract a 'ast-size)))
     (is (eq (enode-find b-1) (enode-find b)))
     (is (eq (enode-find c-1) (enode-find c)))))
 
@@ -189,7 +189,7 @@
        (yield-rewrite (?n))))))
 
 (def-test const-fold ()
-  (let* ((*egraph* (make-egraph))
+  (let* ((*egraph* (make-egraph :analyses 'ast-size))
          (a (make-term '(+ 3 (+ 2 a))))
          (b (make-term '(+ a 5)))
          (c (make-term '(+ 2 (* 3 5)))))
@@ -198,7 +198,7 @@
             (run-rewrites '(commute-add commute-mul assoc-add assoc-mul const-fold)
                           :prune-constant #'numberp :check t :max-iter 10)))
     (is (eq (enode-find a) (enode-find b)))
-    (is (equal 17 (greedy-extract c #'ast-size)))))
+    (is (equal 17 (greedy-extract c 'ast-size)))))
 
 (defrw d-var (d (?x) (?x)) 1 :guard (symbolp ?x))
 (defrw d-const (d (?x) (?c)) 0 :guard (or (numberp ?c)

@@ -12,7 +12,8 @@
                :metabang-bind
                :cl-environments)
   :components ((:file "common")
-               (:file "util")))
+               (:file "util")
+               (:file "ggs")))
 
 (asdf:defsystem #:ggs/eqsat
   :pathname "eqsat/"
